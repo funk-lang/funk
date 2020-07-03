@@ -1,0 +1,15 @@
+repos:
+  - url: git@github.com:funk-lang/funk-grammar.git
+    dest: grammar
+
+  - url: git@github.com:funk-lang/funk-bytecode.git
+    dest: bytecode
+
+  - url: git@github.com:funk-lang/funk-cli.git
+    dest: cli
+
+  - url: git@github.com:funk-lang/funk-vm.git
+    dest: vm
+
+  - url: git@github.com:funk-lang/funk-compiler.git
+    dest: compiler
