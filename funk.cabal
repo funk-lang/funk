@@ -20,6 +20,8 @@ library
     ghc-options:      -Wall
     build-depends:
         base ^>=4.18.3.0,
+        ansi-terminal,
+        optparse-applicative,
         parsec
 
 executable funk

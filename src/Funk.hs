@@ -1,11 +1,86 @@
 module Funk where
 
-import Funk.Parser
+import Data.List
+import Funk.Parser (parseTerm)
 import Funk.Token
+import Options.Applicative
+import System.Console.ANSI
+import Text.Parsec
+import Text.Parsec.Error
 
-run :: String -> IO ()
-run s = case tokenize s of
-  Left err -> putStrLn $ "Error: " ++ show err
-  Right tokens -> case parseTerm tokens of
-    Left err -> putStrLn $ "Parse error: " ++ show err
-    Right t -> putStrLn $ "Parsed term: " ++ show t
+newtype Options = Options
+  { optionsFilePath :: FilePath
+  }
+
+options :: Parser Options
+options =
+  Options <$> argument str (metavar "FILE" <> help "Path to the input file")
+
+run :: IO ()
+run = do
+  opts <- execParser $ info (options <**> helper) fullDesc
+  input <- readFile (optionsFilePath opts)
+  let result = tokenize input >>= parseTerm
+  case result of
+    Left err -> do
+      let (msgs, unexpect, expects) =
+            foldl
+              ( \(m, u, e) msg ->
+                  case msg of
+                    Message m' -> (m ++ [m'], u, e)
+                    UnExpect s -> (m, s, e)
+                    Expect s -> (m, u, e ++ [s])
+                    SysUnExpect s -> (m, s, e)
+              )
+              ([], "", [])
+              (errorMessages err)
+      let expecting = case expects of
+            [] -> "unexpected token"
+            [x] -> "expecting " ++ x
+            xs ->
+              "expecting "
+                ++ intercalate ", " (reverse . tail $ reverse xs)
+                ++ " or "
+                ++ last xs
+          msg =
+            expecting
+              ++ ", found "
+              ++ if null unexpect
+                then "<end of input>"
+                else
+                  unexpect
+                    ++ if null msgs
+                      then ""
+                      else
+                        setSGRCode [SetColor Foreground Vivid Red]
+                          ++ "help:\n"
+                          ++ setSGRCode [Reset]
+                          ++ intercalate "\n" msgs
+      let pos = errorPos err
+          pos' = setSourceColumn pos (sourceColumn pos + 1)
+      putStrLn $ showErrorLine pos' input msg
+    Right term -> print term
+
+showErrorLine :: SourcePos -> String -> String -> String
+showErrorLine pos input msg =
+  let linePos = sourceLine pos
+      colPos = sourceColumn pos
+      srcLine = case drop (linePos - 1) (lines input) of
+        (line : _) -> line
+        [] -> ""
+   in unlines
+        [ " --> "
+            ++ sourceName pos
+            ++ ":"
+            ++ show linePos
+            ++ ":"
+            ++ show colPos,
+          "  |",
+          show linePos ++ " | " ++ srcLine,
+          "  |"
+            ++ setSGRCode [SetColor Foreground Vivid Red]
+            ++ replicate colPos ' '
+            ++ "^ "
+            ++ msg
+            ++ setSGRCode [Reset]
+        ]

@@ -1,48 +1,23 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Funk.Parser where
 
 import Data.Functor (($>))
 import Funk.Term
 import Funk.Token
-import Text.Parsec hiding (anyToken)
+import Text.Parsec
 
 type Parser = Parsec [Located Token] ()
 
-anyToken :: Parser (Located Token)
-anyToken = tokenPrim showTok updatePos Just <?> "any token"
-  where
-    updatePos _ (Located pos _) _ = pos
-
 tok :: Token -> Parser ()
 tok expected =
-  tokenPrim showTok updatePos testTok
-    <?> showTokenPretty expected
+  tokenPrim show updatePos testTok
   where
     testTok (Located _ t)
       | t == expected = Just ()
       | otherwise = Nothing
     updatePos _ (Located pos _) _ = pos
 
-showTokenPretty :: Token -> String
-showTokenPretty = \case
-  TokIdent _ -> "identifier"
-  TokLambda -> "'\\'"
-  TokTypeLambda -> "'/\\'"
-  TokForall -> "'\\/'"
-  TokArrow -> "'->'"
-  TokDot -> "'.'"
-  TokColon -> "':'"
-  TokLParen -> "'('"
-  TokRParen -> "')'"
-  TokLBracket -> "'['"
-  TokRBracket -> "']'"
-
-showTok :: Located Token -> String
-showTok (Located _ t) = showTokenPretty t
-
 identTok :: Parser (Located String)
-identTok = tokenPrim showTok updatePos testTok <?> "identifier"
+identTok = tokenPrim show updatePos testTok <?> "identifier"
   where
     testTok (Located pos (TokIdent s)) = Just (Located pos s)
     testTok _ = Nothing

@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Funk.Token where
 
@@ -9,7 +10,10 @@ data Located a = Located
   { locatedPos :: SourcePos,
     unLocated :: a
   }
-  deriving (Show, Eq, Functor)
+  deriving (Eq, Functor)
+
+instance (Show a) => Show (Located a) where
+  show (Located _ a) = show a
 
 data Token
   = TokIdent String
@@ -23,7 +27,21 @@ data Token
   | TokRParen
   | TokLBracket
   | TokRBracket
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show Token where
+  show = \case
+    TokIdent _ -> "identifier"
+    TokLambda -> "'\\'"
+    TokTypeLambda -> "'/\\'"
+    TokForall -> "'\\/'"
+    TokArrow -> "'->'"
+    TokDot -> "'.'"
+    TokColon -> "':'"
+    TokLParen -> "'('"
+    TokRParen -> "')'"
+    TokLBracket -> "'['"
+    TokRBracket -> "']'"
 
 token :: Parser (Located Token)
 token = do
