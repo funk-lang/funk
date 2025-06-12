@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+
 module Funk.Token where
 
 import Text.Parsec hiding (token)

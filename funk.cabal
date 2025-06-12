@@ -11,6 +11,8 @@ extra-doc-files: CHANGELOG.md
 library
     exposed-modules:
         Funk
+        Funk.Parser
+        Funk.Term
         Funk.Token
 
     hs-source-dirs:   src

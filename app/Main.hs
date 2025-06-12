@@ -1,6 +1,6 @@
 module Main where
 
-import  Funk  
+import Funk
 
 main :: IO ()
-main = run "/\\ x . \\x -> x"
+main = run "/\\ a . \\s : a -> a . \\z : a . z"
