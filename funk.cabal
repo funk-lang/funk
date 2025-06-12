@@ -14,6 +14,7 @@ library
         Funk.Parser
         Funk.Term
         Funk.Token
+        Funk.TypeChecker
 
     hs-source-dirs:   src
     default-language: Haskell2010
@@ -21,6 +22,8 @@ library
     build-depends:
         base ^>=4.18.3.0,
         ansi-terminal,
+        containers,
+        mtl,
         optparse-applicative,
         parsec
 

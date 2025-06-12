@@ -2,7 +2,9 @@ module Funk where
 
 import Data.List
 import Funk.Parser (parseTerm)
+import Funk.Term
 import Funk.Token
+import Funk.TypeChecker
 import Options.Applicative
 import System.Console.ANSI
 import Text.Parsec
@@ -59,7 +61,38 @@ run = do
       let pos = errorPos err
           pos' = setSourceColumn pos (sourceColumn pos + 1)
       putStrLn $ showErrorLine pos' input msg
-    Right term -> print term
+    Right term -> case typeOf term of
+      Left err -> do
+        let (pos, msg) = case err of
+              NotForall t -> (typePos t, "expected forall")
+              NotAFunction t -> (typePos t, "expected function type")
+              Mismatch t1 t2 ->
+                ( typePos t1,
+                  "expected type: "
+                    ++ showTypePretty t1
+                    ++ ", but found: "
+                    ++ showTypePretty t2
+                )
+              UnboundTermVar v ->
+                ( locatedPos v,
+                  "unbound variable `"
+                    ++ show (unIdent $ unLocated v)
+                    ++ "`"
+                )
+        putStrLn $ showErrorLine pos input msg
+      Right ty -> putStrLn $ showTypePretty ty
+
+typePos :: Type -> SourcePos
+typePos (TVar (Located pos _)) = pos
+typePos (TArrow t1 _) = typePos t1
+typePos (TForall (Located pos _) _) = pos
+
+showTypePretty :: Type -> String
+showTypePretty (TVar (Located _ a)) = unIdent a
+showTypePretty (TArrow t1 t2) =
+  showTypePretty t1 ++ " -> " ++ showTypePretty t2
+showTypePretty (TForall (Located _ a) t) =
+  "\\/ " ++ unIdent a ++ ". " ++ showTypePretty t
 
 showErrorLine :: SourcePos -> String -> String -> String
 showErrorLine pos input msg =
