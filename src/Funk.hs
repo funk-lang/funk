@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Funk where
 
 import Data.List
@@ -67,11 +69,15 @@ run = do
         Left errs -> do
           let errMsgs =
                 map
-                  ( \err ->
-                      showErrorLine
-                        (locatedPos err)
-                        ("Unbound identifier: " ++ unIdent (unLocated err))
-                        input
+                  ( \case
+                      MissingIdent i ->
+                        showErrorLine (locatedPos i) input $
+                          "Unknown identifier `" ++ unIdent (unLocated i) ++ "`"
+                      InfiniteType i -> case i of
+                        Nothing -> "Infinite type detected"
+                        Just ident ->
+                          showErrorLine (locatedPos ident) input $
+                            "Infinite type: `" ++ unIdent (unLocated ident) ++ "`"
                   )
                   errs
           putStrLn $ unlines errMsgs

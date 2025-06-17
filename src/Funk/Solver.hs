@@ -99,8 +99,10 @@ data Env = Env
 emptyEnv :: Env
 emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
 
-newtype Solver a = Solver {unSolver :: ExceptT [Located Ident] (StateT Env IO) a}
-  deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [Located Ident])
+data SError = MissingIdent (Located Ident) | InfiniteType (Maybe (Located Ident))
+
+newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT Env IO) a}
+  deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [SError])
 
 instance Applicative Solver where
   pure = Solver . pure
@@ -113,7 +115,7 @@ instance Applicative Solver where
       (Left errs, _) -> throwError errs
       (_, Left errs) -> throwError errs
 
-runSolver :: Solver a -> IO (Either [Located Ident] a)
+runSolver :: Solver a -> IO (Either [SError] a)
 runSolver solver = fst <$> runStateT (runExceptT $ unSolver solver) emptyEnv
 
 freshTy :: Located Ident -> Solver STBinding
@@ -142,7 +144,7 @@ substTy pty = case pty of
     env <- get
     case Map.lookup (unLocated i) (envTys env) of
       Just ref -> return $ TVar ref
-      Nothing -> throwError [i]
+      Nothing -> throwError [MissingIdent i]
   TArrow t1 t2 -> TArrow <$> substTy t1 <*> substTy t2
   TForall i t -> do
     ref <- freshTy i
@@ -155,10 +157,10 @@ substTerm pterm = case pterm of
     env <- get
     termBinding <- case Map.lookup (unLocated i) (envVars env) of
       Just ref -> return ref
-      Nothing -> throwError [i]
+      Nothing -> throwError [MissingIdent i]
     typeBinding <- case Map.lookup (unLocated i) (envVarTypes env) of
       Just ty -> return ty
-      Nothing -> throwError [i]
+      Nothing -> throwError [MissingIdent i]
     return $ Var typeBinding termBinding
   Lam _ (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
@@ -182,7 +184,7 @@ substTerm pterm = case pterm of
     return $ TyLam ty i' body'
   TyApp _ t ty -> TyApp <$> freshFreeTy <*> substTerm t <*> substTy ty
 
-subst :: PTerm -> IO (Either [Located Ident] STerm)
+subst :: PTerm -> IO (Either [SError] STerm)
 subst = runSolver . substTerm
 
 data Constraint = CEq SType SType
@@ -284,7 +286,12 @@ substituteTypeVar old new ty = case ty of
 bindVar :: STBinding -> SType -> Solver ()
 bindVar v ty = do
   occurs <- occursCheck v ty
-  when occurs $ error "Occurs check fails"
+  when occurs $ do
+    v' <- liftIO $ readIORef v
+    case v' of
+      Unbound i _ -> throwError [InfiniteType $ Just i]
+      Free _ -> throwError [InfiniteType Nothing]
+      _ -> return ()
   liftIO $ writeIORef v (Bound ty)
 
 occursCheck :: STBinding -> SType -> Solver Bool
@@ -302,7 +309,7 @@ solve t = do
   where
     go (CEq t1 t2) = unify t1 t2
 
-solvePTerm :: PTerm -> IO (Either [Located Ident] STerm)
+solvePTerm :: PTerm -> IO (Either [SError] STerm)
 solvePTerm pterm = do
   res <- subst pterm
   case res of
