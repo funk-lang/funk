@@ -1,9 +1,9 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Funk.Subst where
 
 import Control.Monad.Except
-import Control.Monad.Identity
 import Control.Monad.State
 import Data.IORef
 import Data.Map (Map)
@@ -12,18 +12,30 @@ import Funk.Parser
 import Funk.Term
 import Funk.Token
 
-data Binding = Bound (Type Binding) | Unbound (Located Ident) Int
+data TBinding = Bound (Type TBinding) | Unbound (Located Ident) Int | Free Int
   deriving (Show, Eq)
 
-type SType = Type (IORef Binding)
+type STBinding = IORef TBinding
 
-data Var = VBound (Term Identity (IORef Binding) Var) | VUnbound (Located Ident)
+type SType = Type STBinding
 
-type STerm = Term Identity (IORef Binding) (IORef Var)
+data Var = VBound (Term TBinding) | VUnbound (Located Ident)
+
+newtype SBinding = SBinding {unSBinding :: IORef Var}
+
+instance Binding SBinding where
+  type BTVar SBinding = STBinding
+  type BVar SBinding = STBinding
+  type BLam SBinding = STBinding
+  type BApp SBinding = STBinding
+  type BTyLam SBinding = STBinding
+  type BTyApp SBinding = STBinding
+
+type STerm = Term SBinding
 
 data Env = Env
-  { envVars :: Map Ident (IORef Var),
-    envTys :: Map Ident (IORef Binding),
+  { envVars :: Map Ident SBinding,
+    envTys :: Map Ident STBinding,
     envNextIdx :: Int
   }
 
@@ -47,7 +59,7 @@ instance Applicative Subst where
 runSubst :: Subst a -> IO (Either [Located Ident] a)
 runSubst solver = fst <$> runStateT (runExceptT $ unSubst solver) emptyEnv
 
-freshTy :: Located Ident -> Subst (IORef Binding)
+freshTy :: Located Ident -> Subst STBinding
 freshTy i = do
   env <- get
   let idx = envNextIdx env
@@ -57,6 +69,14 @@ freshTy i = do
       { envTys = Map.insert (unLocated i) ref $ envTys env,
         envNextIdx = envNextIdx env + 1
       }
+  return ref
+
+freshFreeTy :: Subst STBinding
+freshFreeTy = do
+  env <- get
+  let idx = envNextIdx env
+  ref <- liftIO $ newIORef (Free idx)
+  put env {envNextIdx = envNextIdx env + 1}
   return ref
 
 substTy :: PType -> Subst SType
@@ -74,26 +94,29 @@ substTy pty = case pty of
 
 substTerm :: PTerm -> Subst STerm
 substTerm pterm = case pterm of
-  Var i -> do
+  Var _ (PBinding i) -> do
+    t <- freshFreeTy
     env <- get
     case Map.lookup (unLocated i) (envVars env) of
-      Just ref -> return $ Var ref
+      Just ref -> return $ Var t ref
       Nothing -> throwError [i]
-  Lam i mty body -> do
+  Lam _ (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
     modify $ \env ->
-      env {envVars = Map.insert (unLocated i) i' (envVars env)}
+      env {envVars = Map.insert (unLocated i) (SBinding i') (envVars env)}
     ty <- case mty of
-      Just ty -> substTy ty
-      Nothing -> TVar <$> freshTy i
+      Just ty -> Just <$> substTy ty
+      Nothing -> return Nothing
     body' <- substTerm body
-    return $ Lam i' (pure ty) body'
-  App t1 t2 -> App <$> substTerm t1 <*> substTerm t2
-  TyLam i body -> do
+    lamTy <- freshFreeTy
+    return $ Lam lamTy (SBinding i') ty body'
+  App _ t1 t2 -> App <$> freshFreeTy <*> substTerm t1 <*> substTerm t2
+  TyLam _ i body -> do
+    ty <- freshFreeTy
     i' <- freshTy i
     body' <- substTerm body
-    return $ TyLam i' body'
-  TyApp t ty -> TyApp <$> substTerm t <*> substTy ty
+    return $ TyLam ty i' body'
+  TyApp _ t ty -> TyApp <$> freshFreeTy <*> substTerm t <*> substTy ty
 
 subst :: PTerm -> IO (Either [Located Ident] STerm)
 subst = runSubst . substTerm

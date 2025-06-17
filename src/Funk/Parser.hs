@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeFamilies #-}
+
 module Funk.Parser where
 
 import Data.Functor (($>))
@@ -9,7 +11,20 @@ type Parser = Parsec [Located Token] ()
 
 type PType = Type (Located Ident)
 
-type PTerm = Term Maybe (Located Ident) (Located Ident)
+newtype PBinding = PBinding
+  { unPBinding :: Located Ident
+  }
+  deriving (Show, Eq)
+
+instance Binding PBinding where
+  type BTVar PBinding = Located Ident
+  type BVar PBinding = ()
+  type BLam PBinding = ()
+  type BApp PBinding = ()
+  type BTyLam PBinding = ()
+  type BTyApp PBinding = ()
+
+type PTerm = Term PBinding
 
 tok :: Token -> Parser ()
 tok expected =
@@ -52,7 +67,7 @@ typeExpr :: Parser PType
 typeExpr = chainr1 atomicType (tok TokArrow $> TArrow)
 
 varTerm :: Parser PTerm
-varTerm = Var . fmap Ident <$> identTok
+varTerm = Var () . PBinding . fmap Ident <$> identTok
 
 parensTerm :: Parser PTerm
 parensTerm = tok TokLParen *> term <* tok TokRParen
@@ -61,10 +76,10 @@ lambdaTerm :: Parser PTerm
 lambdaTerm = do
   tok TokLambda
   Located pos s <- identTok
-  let v = Located pos (Ident s)
+  let v = PBinding $ Located pos (Ident s)
   ty <- optionMaybe (tok TokColon *> typeExpr)
   tok TokDot
-  Lam v ty <$> term
+  Lam () v ty <$> term
 
 tyLamTerm :: Parser PTerm
 tyLamTerm = do
@@ -72,7 +87,7 @@ tyLamTerm = do
   Located pos s <- identTok
   let v = Located pos (Ident s)
   tok TokDot
-  TyLam v <$> term
+  TyLam () v <$> term
 
 atomicTerm :: Parser PTerm
 atomicTerm =
@@ -91,12 +106,12 @@ appTerm = do
           tok TokLBracket
           ty <- typeExpr
           tok TokRBracket
-          rest (TyApp f ty)
+          rest (TyApp () f ty)
       )
         <|> try
           ( do
               arg <- atomicTerm
-              rest (App f arg)
+              rest (App () f arg)
           )
         <|> return f
 

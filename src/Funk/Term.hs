@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeFamilies #-}
+
 module Funk.Term where
 
 newtype Ident = Ident {unIdent :: String}
@@ -9,9 +11,17 @@ data Type b
   | TForall b (Type b)
   deriving (Show, Eq)
 
-data Term f ty b
-  = Var b
-  | Lam b (f (Type ty)) (Term f ty b)
-  | App (Term f ty b) (Term f ty b)
-  | TyLam ty (Term f ty b)
-  | TyApp (Term f ty b) (Type ty)
+class Binding b where
+  type BTVar b
+  type BVar b
+  type BLam b
+  type BApp b
+  type BTyLam b
+  type BTyApp b
+
+data Term b
+  = Var (BVar b) b
+  | Lam (BLam b) b (Maybe (Type (BTVar b))) (Term b)
+  | App (BApp b) (Term b) (Term b)
+  | TyLam (BTyLam b) (BTVar b) (Term b)
+  | TyApp (BTyApp b) (Term b) (Type (BTVar b))
