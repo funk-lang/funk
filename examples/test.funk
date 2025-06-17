@@ -1,7 +1,3 @@
-(\true . \false . \not . not true)
+(\true . \x : \/ a . a .  true x)
 
 (/\ a . \x : a . \y : a . x)
-
-(/\ a . \x : a . \y : a . y)
-
-(\b : (\/a . a -> a -> a) . /\ a . \x : a . \y : a . b[a] y x)

@@ -2,12 +2,13 @@ module Funk where
 
 import Data.List
 import Funk.Parser (parseTerm)
+import Funk.Solver
+import Funk.Term
 import Funk.Token
 import Options.Applicative
 import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Error
-import Funk.Subst
 
 newtype Options = Options
   { optionsFilePath :: FilePath
@@ -61,10 +62,22 @@ run = do
           pos' = setSourceColumn pos (sourceColumn pos + 1)
       putStrLn $ showErrorLine pos' input msg
     Right term -> do
-      res <- subst term
+      res <- solvePTerm term
       case res of
-        Left errs -> print errs
-        Right substTerm -> putStrLn "Lit!"
+        Left errs -> do
+          let errMsgs =
+                map
+                  ( \err ->
+                      showErrorLine
+                        (locatedPos err)
+                        ("Unbound identifier: " ++ unIdent (unLocated err))
+                        input
+                  )
+                  errs
+          putStrLn $ unlines errMsgs
+        Right st -> do
+          s <- showSTerm st
+          putStrLn s
 
 showErrorLine :: SourcePos -> String -> String -> String
 showErrorLine pos input msg =

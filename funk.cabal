@@ -12,7 +12,7 @@ library
     exposed-modules:
         Funk
         Funk.Parser
-        Funk.Subst
+        Funk.Solver
         Funk.Term
         Funk.Token
 
