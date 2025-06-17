@@ -12,9 +12,9 @@ library
     exposed-modules:
         Funk
         Funk.Parser
+        Funk.Subst
         Funk.Term
         Funk.Token
-        Funk.TypeChecker
 
     hs-source-dirs:   src
     default-language: Haskell2010

@@ -7,6 +7,10 @@ import Text.Parsec
 
 type Parser = Parsec [Located Token] ()
 
+type PType = Type (Located Ident)
+
+type PTerm = Term Maybe (Located Ident) (Located Ident)
+
 tok :: Token -> Parser ()
 tok expected =
   tokenPrim show updatePos testTok
@@ -23,20 +27,20 @@ identTok = tokenPrim show updatePos testTok <?> "identifier"
     testTok _ = Nothing
     updatePos _ (Located pos _) _ = pos
 
-typeVar :: Parser Type
+typeVar :: Parser PType
 typeVar = TVar . fmap Ident <$> identTok
 
-parensType :: Parser Type
+parensType :: Parser PType
 parensType = tok TokLParen *> typeExpr <* tok TokRParen
 
-forallType :: Parser Type
+forallType :: Parser PType
 forallType = do
   tok TokForall
   v <- fmap (Ident <$>) identTok
   tok TokDot
   TForall v <$> typeExpr
 
-atomicType :: Parser Type
+atomicType :: Parser PType
 atomicType =
   choice
     [ try forallType,
@@ -44,16 +48,16 @@ atomicType =
       parensType
     ]
 
-typeExpr :: Parser Type
+typeExpr :: Parser PType
 typeExpr = chainr1 atomicType (tok TokArrow $> TArrow)
 
-varTerm :: Parser Term
+varTerm :: Parser PTerm
 varTerm = Var . fmap Ident <$> identTok
 
-parensTerm :: Parser Term
+parensTerm :: Parser PTerm
 parensTerm = tok TokLParen *> term <* tok TokRParen
 
-lambdaTerm :: Parser Term
+lambdaTerm :: Parser PTerm
 lambdaTerm = do
   tok TokLambda
   Located pos s <- identTok
@@ -62,7 +66,7 @@ lambdaTerm = do
   tok TokDot
   Lam v ty <$> term
 
-tyLamTerm :: Parser Term
+tyLamTerm :: Parser PTerm
 tyLamTerm = do
   tok TokTypeLambda
   Located pos s <- identTok
@@ -70,14 +74,14 @@ tyLamTerm = do
   tok TokDot
   TyLam v <$> term
 
-atomicTerm :: Parser Term
+atomicTerm :: Parser PTerm
 atomicTerm =
   choice
     [ varTerm,
       parensTerm
     ]
 
-appTerm :: Parser Term
+appTerm :: Parser PTerm
 appTerm = do
   f0 <- atomicTerm
   rest f0
@@ -96,7 +100,7 @@ appTerm = do
           )
         <|> return f
 
-term :: Parser Term
+term :: Parser PTerm
 term =
   choice
     [ try lambdaTerm,
@@ -104,5 +108,5 @@ term =
       appTerm
     ]
 
-parseTerm :: [Located Token] -> Either ParseError Term
+parseTerm :: [Located Token] -> Either ParseError PTerm
 parseTerm = parse (term <* eof) "<input>"
