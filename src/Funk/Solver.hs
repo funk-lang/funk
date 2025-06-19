@@ -14,12 +14,15 @@ import Funk.Parser
 import Funk.Term
 import Funk.Token
 
-data TBinding = Bound (Type STBinding) | Unbound (Located Ident) Int | Free Int
+data TBinding
+  = Bound (Type STBinding)
+  | Skolem (Located Ident) Int
+  | Unbound Int
 
 showTBinding :: TBinding -> IO String
 showTBinding (Bound ty) = showSType ty
-showTBinding (Unbound i _) = return $ unIdent (unLocated i)
-showTBinding (Free idx) = return $ "_" ++ show idx
+showTBinding (Skolem i _) = return $ unIdent (unLocated i)
+showTBinding (Unbound idx) = return $ "_" ++ show idx
 
 type STBinding = IORef TBinding
 
@@ -99,7 +102,10 @@ data Env = Env
 emptyEnv :: Env
 emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
 
-data SError = MissingIdent (Located Ident) | InfiniteType (Maybe (Located Ident))
+data SError
+  = MissingIdent (Located Ident)
+  | InfiniteType (Maybe (Located Ident))
+  | UnificationError SType SType
 
 newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT Env IO) a}
   deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [SError])
@@ -118,11 +124,11 @@ instance Applicative Solver where
 runSolver :: Solver a -> IO (Either [SError] a)
 runSolver solver = fst <$> runStateT (runExceptT $ unSolver solver) emptyEnv
 
-freshTy :: Located Ident -> Solver STBinding
-freshTy i = do
+freshSkolem :: Located Ident -> Solver STBinding
+freshSkolem i = do
   env <- get
   let idx = envNextIdx env
-  ref <- liftIO . newIORef $ Unbound i idx
+  ref <- liftIO . newIORef $ Skolem i idx
   put
     env
       { envTys = Map.insert (unLocated i) ref $ envTys env,
@@ -130,11 +136,11 @@ freshTy i = do
       }
   return ref
 
-freshFreeTy :: Solver STBinding
-freshFreeTy = do
+freshUnboundTy :: Solver STBinding
+freshUnboundTy = do
   env <- get
   let idx = envNextIdx env
-  ref <- liftIO $ newIORef (Free idx)
+  ref <- liftIO $ newIORef (Unbound idx)
   put env {envNextIdx = envNextIdx env + 1}
   return ref
 
@@ -147,7 +153,7 @@ substTy pty = case pty of
       Nothing -> throwError [MissingIdent i]
   TArrow t1 t2 -> TArrow <$> substTy t1 <*> substTy t2
   TForall i t -> do
-    ref <- freshTy i
+    ref <- freshSkolem i
     st <- substTy t
     return $ TForall ref st
 
@@ -164,7 +170,7 @@ substTerm pterm = case pterm of
     return $ Var typeBinding termBinding
   Lam _ (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
-    iTy <- freshFreeTy
+    iTy <- freshUnboundTy
     modify $ \env ->
       env
         { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
@@ -174,15 +180,15 @@ substTerm pterm = case pterm of
       Just ty -> Just <$> substTy ty
       Nothing -> return Nothing
     body' <- substTerm body
-    oTy <- freshFreeTy
+    oTy <- freshUnboundTy
     return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
-  App _ t1 t2 -> App <$> freshFreeTy <*> substTerm t1 <*> substTerm t2
+  App _ t1 t2 -> App <$> freshUnboundTy <*> substTerm t1 <*> substTerm t2
   TyLam _ i body -> do
-    ty <- freshFreeTy
-    i' <- freshTy i
+    ty <- freshUnboundTy
+    i' <- freshSkolem i
     body' <- substTerm body
     return $ TyLam ty i' body'
-  TyApp _ t ty -> TyApp <$> freshFreeTy <*> substTerm t <*> substTy ty
+  TyApp _ t ty -> TyApp <$> freshUnboundTy <*> substTerm t <*> substTy ty
 
 subst :: PTerm -> IO (Either [SError] STerm)
 subst = runSolver . substTerm
@@ -218,7 +224,7 @@ constraints = \case
     return $ CEq (TVar ty) (TForall v (TVar (typeOf body))) : cs
   TyApp _ body outTy -> do
     csFun <- constraints body
-    iTy <- freshFreeTy
+    iTy <- freshUnboundTy
     return $
       CEq (TVar (typeOf body)) (TForall iTy outTy)
         : csFun
@@ -242,37 +248,43 @@ unify t1 t2 = do
   case (ta, tb) of
     (TVar v1, TVar v2) | v1 == v2 -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
-      fresh <- freshFreeTy
+      fresh <- freshUnboundTy
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
       let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
       unify t1Subst t2Subst
     (TForall v t, other) -> do
-      fresh <- freshFreeTy
+      fresh <- freshUnboundTy
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify tSubst other
     (other, TForall v t) -> do
-      fresh <- freshFreeTy
+      fresh <- freshUnboundTy
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
     (TVar v1, TVar v2) -> do
       v1' <- liftIO $ readIORef v1
       v2' <- liftIO $ readIORef v2
       case (v1', v2') of
-        (Bound t1', Bound t2') -> unify t1' t2'
-        (Bound t1', _) -> bindVar v2 t1'
-        (_, Bound t2') -> bindVar v1 t2'
-        (Unbound _ idx1, Unbound _ idx2) ->
-          if idx1 < idx2
-            then bindVar v2 (TVar v1)
-            else bindVar v1 (TVar v2)
-        (Free idx1, Free idx2) ->
-          if idx1 < idx2
-            then bindVar v2 (TVar v1)
-            else bindVar v1 (TVar v2)
-        (Free _, _) -> bindVar v1 (TVar v2)
-        (_, Free _) -> bindVar v2 (TVar v1)
-    (TVar v, r) -> bindVar v r
-    (l, TVar v) -> bindVar v l
+        (Skolem _ id1, Skolem _ id2) ->
+          when (id1 /= id2) $ throwError [UnificationError ta tb]
+        (Unbound id1, Unbound id2) ->
+          if id1 < id2
+            then bindVar v2 ta
+            else bindVar v1 tb
+        (Unbound {}, Skolem {}) -> bindVar v1 tb
+        (Skolem {}, Unbound {}) -> bindVar v2 ta
+        _ ->  throwError [UnificationError ta tb]
+    (TVar v, r) -> do
+      v' <- liftIO $ readIORef v
+      case v' of
+        Skolem {} -> throwError [UnificationError (TVar v) r]
+        Unbound {} -> bindVar v r
+        _ -> throwError [UnificationError (TVar v) r]
+    (l, TVar v) -> do
+      v' <- liftIO $ readIORef v
+      case v' of
+        Skolem {} -> throwError [UnificationError l (TVar v)]
+        Unbound {} -> bindVar v l
+        _ -> throwError [UnificationError l (TVar v)]
     (TArrow a1 a2, TArrow b1 b2) -> unify a1 b1 >> unify a2 b2
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -289,8 +301,8 @@ bindVar v ty = do
   when occurs $ do
     v' <- liftIO $ readIORef v
     case v' of
-      Unbound i _ -> throwError [InfiniteType $ Just i]
-      Free _ -> throwError [InfiniteType Nothing]
+      Skolem i _ -> throwError [InfiniteType $ Just i]
+      Unbound _ -> throwError [InfiniteType Nothing]
       _ -> return ()
   liftIO $ writeIORef v (Bound ty)
 
