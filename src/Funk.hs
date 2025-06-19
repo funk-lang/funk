@@ -24,7 +24,7 @@ run = do
   input <- readFile (optionsFilePath opts)
   res <- tryRun input
   case res of
-    Left err -> putStrLn $ showErrorPretty err input
+    Left err -> showErrorPretty err input >>= putStrLn
     Right st -> do
       stStr <- showSTerm st
       putStrLn stStr
@@ -81,21 +81,32 @@ showParseErrorPretty err input =
       pos' = setSourceColumn pos (sourceColumn pos + 1)
    in showErrorLine pos' input msg
 
-showSErrorPretty :: SError -> String -> String
+showSErrorPretty :: SError -> String -> IO String
 showSErrorPretty err input =
   case err of
     MissingIdent i ->
-      showErrorLine (locatedPos i) input $
-        "Unknown identifier `" ++ unIdent (unLocated i) ++ "`"
+      return $
+        showErrorLine (locatedPos i) input $
+          "Unknown identifier `" ++ unIdent (unLocated i) ++ "`"
     InfiniteType i -> case i of
-      Nothing -> "Infinite type detected"
-      Just ident ->
-        showErrorLine (locatedPos ident) input $
-          "Infinite type: `" ++ unIdent (unLocated ident) ++ "`"
+      Left pos -> return $ showErrorLine pos input "Infinite type detected"
+      Right ident ->
+        return $
+          showErrorLine (locatedPos ident) input $
+            "Infinite type: `" ++ unIdent (unLocated ident) ++ "`"
+    UnificationError t1 t2 -> do
+      t1Str <- showSType t1
+      t2Str <- showSType t2
+      return $
+        "Unification error: cannot unify types `"
+          ++ t1Str
+          ++ "` and `"
+          ++ t2Str
+          ++ "`"
 
-showErrorPretty :: Error -> String -> String
-showErrorPretty (ParserError err) input = showParseErrorPretty err input
-showErrorPretty (SolverError errs) input = unlines $ map (`showSErrorPretty` input) errs
+showErrorPretty :: Error -> String -> IO String
+showErrorPretty (ParserError err) input = return $ showParseErrorPretty err input
+showErrorPretty (SolverError errs) input = unlines <$> mapM (`showSErrorPretty` input) errs
 
 showErrorLine :: SourcePos -> String -> String -> String
 showErrorLine pos input msg =

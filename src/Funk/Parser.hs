@@ -19,10 +19,10 @@ newtype PBinding = PBinding
 instance Binding PBinding where
   type BTVar PBinding = Located Ident
   type BVar PBinding = ()
-  type BLam PBinding = ()
-  type BApp PBinding = ()
-  type BTyLam PBinding = ()
-  type BTyApp PBinding = ()
+  type BLam PBinding = SourcePos
+  type BApp PBinding = SourcePos
+  type BTyLam PBinding = SourcePos
+  type BTyApp PBinding = SourcePos
 
 type PTerm = Term PBinding
 
@@ -74,20 +74,22 @@ parensTerm = tok TokLParen *> term <* tok TokRParen
 
 lambdaTerm :: Parser PTerm
 lambdaTerm = do
+  pos <- getPosition
   tok TokLambda
-  Located pos s <- identTok
-  let v = PBinding $ Located pos (Ident s)
+  Located pos' s <- identTok
+  let v = PBinding $ Located pos' (Ident s)
   ty <- optionMaybe (tok TokColon *> typeExpr)
   tok TokDot
-  Lam () v ty <$> term
+  Lam pos v ty <$> term
 
 tyLamTerm :: Parser PTerm
 tyLamTerm = do
+  pos <- getPosition
   tok TokTypeLambda
-  Located pos s <- identTok
-  let v = Located pos (Ident s)
+  Located pos' s <- identTok
+  let v = Located pos' (Ident s)
   tok TokDot
-  TyLam () v <$> term
+  TyLam pos v <$> term
 
 atomicTerm :: Parser PTerm
 atomicTerm =
@@ -103,15 +105,17 @@ appTerm = do
   where
     rest f =
       ( do
+          pos <- getPosition
           tok TokLBracket
           ty <- typeExpr
           tok TokRBracket
-          rest (TyApp () f ty)
+          rest (TyApp pos f ty)
       )
         <|> try
           ( do
+              pos <- getPosition
               arg <- atomicTerm
-              rest (App () f arg)
+              rest (App pos f arg)
           )
         <|> return f
 

@@ -13,18 +13,27 @@ import qualified Data.Map as Map
 import Funk.Parser
 import Funk.Term
 import Funk.Token
+import Text.Parsec
 
 data TBinding
   = Bound (Type STBinding)
   | Skolem (Located Ident) Int
-  | Unbound Int
+  | Unbound SourcePos Int
 
 showTBinding :: TBinding -> IO String
 showTBinding (Bound ty) = showSType ty
 showTBinding (Skolem i _) = return $ unIdent (unLocated i)
-showTBinding (Unbound idx) = return $ "_" ++ show idx
+showTBinding (Unbound _ idx) = return $ "_" ++ show idx
 
 type STBinding = IORef TBinding
+
+bindingPos :: STBinding -> IO SourcePos
+bindingPos ref = do
+  b <- readIORef ref
+  case b of
+    Bound t -> typePos t
+    Skolem i _ -> return $ locatedPos i
+    Unbound pos _ -> return pos
 
 type SType = Type STBinding
 
@@ -41,6 +50,21 @@ showSType (TForall ref t) = do
   bStr <- showTBinding b
   st <- showSType t
   return $ "(\\/ " ++ bStr ++ " . " ++ st ++ ")"
+
+typePos :: SType -> IO SourcePos
+typePos (TVar ref) = do
+  b <- readIORef ref
+  case b of
+    Bound t -> typePos t
+    Skolem i _ -> return $ locatedPos i
+    Unbound pos _ -> return pos
+typePos (TArrow t1 _) = typePos t1
+typePos (TForall ref _) = do
+  b <- readIORef ref
+  case b of
+    Bound t -> typePos t
+    Skolem i _ -> return $ locatedPos i
+    Unbound pos _ -> return pos
 
 data Var = VBound STerm | VUnbound (Located Ident)
 
@@ -104,7 +128,7 @@ emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty
 
 data SError
   = MissingIdent (Located Ident)
-  | InfiniteType (Maybe (Located Ident))
+  | InfiniteType (Either SourcePos (Located Ident))
   | UnificationError SType SType
 
 newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT Env IO) a}
@@ -136,11 +160,11 @@ freshSkolem i = do
       }
   return ref
 
-freshUnboundTy :: Solver STBinding
-freshUnboundTy = do
+freshUnboundTy :: SourcePos -> Solver STBinding
+freshUnboundTy pos = do
   env <- get
   let idx = envNextIdx env
-  ref <- liftIO $ newIORef (Unbound idx)
+  ref <- liftIO $ newIORef (Unbound pos idx)
   put env {envNextIdx = envNextIdx env + 1}
   return ref
 
@@ -168,9 +192,9 @@ substTerm pterm = case pterm of
       Just ty -> return ty
       Nothing -> throwError [MissingIdent i]
     return $ Var typeBinding termBinding
-  Lam _ (PBinding i) mty body -> do
+  Lam pos (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
-    iTy <- freshUnboundTy
+    iTy <- freshUnboundTy pos
     modify $ \env ->
       env
         { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
@@ -180,15 +204,15 @@ substTerm pterm = case pterm of
       Just ty -> Just <$> substTy ty
       Nothing -> return Nothing
     body' <- substTerm body
-    oTy <- freshUnboundTy
+    oTy <- freshUnboundTy pos
     return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
-  App _ t1 t2 -> App <$> freshUnboundTy <*> substTerm t1 <*> substTerm t2
-  TyLam _ i body -> do
-    ty <- freshUnboundTy
+  App pos t1 t2 -> App <$> freshUnboundTy pos <*> substTerm t1 <*> substTerm t2
+  TyLam pos i body -> do
+    ty <- freshUnboundTy pos
     i' <- freshSkolem i
     body' <- substTerm body
     return $ TyLam ty i' body'
-  TyApp _ t ty -> TyApp <$> freshUnboundTy <*> substTerm t <*> substTy ty
+  TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substTerm t <*> substTy ty
 
 subst :: PTerm -> IO (Either [SError] STerm)
 subst = runSolver . substTerm
@@ -222,12 +246,11 @@ constraints = \case
   TyLam ty v body -> do
     cs <- constraints body
     return $ CEq (TVar ty) (TForall v (TVar (typeOf body))) : cs
-  TyApp _ body outTy -> do
+  TyApp ty body outTy -> do
+    pos <- liftIO $ bindingPos ty
     csFun <- constraints body
-    iTy <- freshUnboundTy
-    return $
-      CEq (TVar (typeOf body)) (TForall iTy outTy)
-        : csFun
+    iTy <- freshUnboundTy pos
+    return $ CEq (TVar (typeOf body)) (TForall iTy outTy) : csFun
 
 prune :: SType -> Solver SType
 prune ty@(TVar ref) = do
@@ -245,19 +268,20 @@ unify :: SType -> SType -> Solver ()
 unify t1 t2 = do
   ta <- prune t1
   tb <- prune t2
+  pos <- liftIO $ typePos ta
   case (ta, tb) of
     (TVar v1, TVar v2) | v1 == v2 -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
-      fresh <- freshUnboundTy
+      fresh <- freshUnboundTy pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
       let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
       unify t1Subst t2Subst
     (TForall v t, other) -> do
-      fresh <- freshUnboundTy
+      fresh <- freshUnboundTy pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify tSubst other
     (other, TForall v t) -> do
-      fresh <- freshUnboundTy
+      fresh <- freshUnboundTy pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
     (TVar v1, TVar v2) -> do
@@ -266,13 +290,13 @@ unify t1 t2 = do
       case (v1', v2') of
         (Skolem _ id1, Skolem _ id2) ->
           when (id1 /= id2) $ throwError [UnificationError ta tb]
-        (Unbound id1, Unbound id2) ->
+        (Unbound _ id1, Unbound _ id2) ->
           if id1 < id2
             then bindVar v2 ta
             else bindVar v1 tb
         (Unbound {}, Skolem {}) -> bindVar v1 tb
         (Skolem {}, Unbound {}) -> bindVar v2 ta
-        _ ->  throwError [UnificationError ta tb]
+        _ -> throwError [UnificationError ta tb]
     (TVar v, r) -> do
       v' <- liftIO $ readIORef v
       case v' of
@@ -301,8 +325,8 @@ bindVar v ty = do
   when occurs $ do
     v' <- liftIO $ readIORef v
     case v' of
-      Skolem i _ -> throwError [InfiniteType $ Just i]
-      Unbound _ -> throwError [InfiniteType Nothing]
+      Skolem i _ -> throwError [InfiniteType $ Right i]
+      Unbound pos _ -> throwError [InfiniteType $ Left pos]
       _ -> return ()
   liftIO $ writeIORef v (Bound ty)
 
