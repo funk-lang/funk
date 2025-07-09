@@ -9,6 +9,7 @@ import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Error
+import Funk.STerm
 
 newtype Options = Options
   { optionsFilePath :: FilePath

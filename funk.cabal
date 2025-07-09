@@ -13,6 +13,7 @@ library
         Funk
         Funk.Parser
         Funk.Solver
+        Funk.STerm
         Funk.Term
         Funk.Token
 
