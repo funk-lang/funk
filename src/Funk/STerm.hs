@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Funk.STerm where
 
@@ -76,6 +77,14 @@ instance Binding SBinding where
   type BTyApp SBinding = STBinding
 
 type STerm = Term SBinding
+
+typeOf :: STerm -> STBinding
+typeOf = \case
+  Var ty _ -> ty
+  App ty _ _ -> ty
+  Lam (SLam _ ty) _ _ _ -> ty
+  TyLam ty _ _ -> ty
+  TyApp ty _ _ -> ty
 
 showSTerm :: STerm -> IO String
 showSTerm (Var _ ref) = do

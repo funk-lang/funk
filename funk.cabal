@@ -11,6 +11,7 @@ extra-doc-files: CHANGELOG.md
 library
     exposed-modules:
         Funk
+        Funk.Infer
         Funk.Parser
         Funk.Solver
         Funk.STerm

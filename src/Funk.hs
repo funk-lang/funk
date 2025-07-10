@@ -3,6 +3,7 @@
 module Funk where
 
 import Data.List
+import Funk.Infer (infer)
 import Funk.Parser (parseTerm)
 import Funk.STerm
 import Funk.Solver hiding (envNextIdx)
@@ -42,10 +43,11 @@ tryRun input = do
       (res, env) <- subst term
       case res of
         Left errs -> return $ Left (SubstError errs)
-        Right t ->
-          solvePTerm t (Env (envNextIdx env)) >>= \case
+        Right t -> do
+          cs <- infer t
+          solveConstraints cs (Env $ envNextIdx env) >>= \case
             Left errs -> return $ Left (SolverError errs)
-            Right st -> return $ Right st
+            Right () -> return $ Right t
 
 data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
 

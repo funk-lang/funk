@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
+import Funk.Infer (Constraint (..))
 import Funk.STerm
 import Funk.Term
 import Funk.Token
@@ -46,41 +47,6 @@ freshUnboundTy pos = do
   ref <- liftIO $ newIORef (Unbound pos idx)
   put env {envNextIdx = envNextIdx env + 1}
   return ref
-
-data Constraint = CEq SType SType
-
-typeOf :: STerm -> STBinding
-typeOf = \case
-  Var ty _ -> ty
-  App ty _ _ -> ty
-  Lam (SLam _ ty) _ _ _ -> ty
-  TyLam ty _ _ -> ty
-  TyApp ty _ _ -> ty
-
-constraints :: STerm -> Solver [Constraint]
-constraints = \case
-  Var _ _ -> return []
-  App ty t1 t2 -> do
-    cs1 <- constraints t1
-    cs2 <- constraints t2
-    return $
-      [CEq (TVar (typeOf t1)) (TArrow (TVar (typeOf t2)) (TVar ty))]
-        ++ cs1
-        ++ cs2
-  Lam (SLam iTy oTy) _ mty body -> do
-    cs <- constraints body
-    let cs' = case mty of
-          Just ann -> CEq (TVar iTy) ann : cs
-          Nothing -> cs
-    return $ CEq (TVar oTy) (TArrow (TVar iTy) (TVar $ typeOf body)) : cs'
-  TyLam ty v body -> do
-    cs <- constraints body
-    return $ CEq (TVar ty) (TForall v (TVar (typeOf body))) : cs
-  TyApp ty body outTy -> do
-    pos <- liftIO $ bindingPos ty
-    csFun <- constraints body
-    iTy <- freshUnboundTy pos
-    return $ CEq (TVar (typeOf body)) (TForall iTy outTy) : csFun
 
 prune :: SType -> Solver SType
 prune ty@(TVar ref) = do
@@ -168,16 +134,14 @@ occursCheck v t = do
     TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
     TForall _ th -> occursCheck v th
 
-solve :: STerm -> Solver ()
-solve t = do
-  cs <- constraints t
-  mapM_ go cs
+solve :: [Constraint] -> Solver ()
+solve = mapM_ go
   where
     go (CEq t1 t2) = unify t1 t2
 
-solvePTerm :: STerm -> Env -> IO (Either [SError] STerm)
-solvePTerm t env = do
-  res' <- runSolver (solve t) env
+solveConstraints :: [Constraint] -> Env -> IO (Either [SError] ())
+solveConstraints cs env = do
+  res' <- runSolver (solve cs) env
   case res' of
     Left errs -> return (Left errs)
-    Right () -> return (Right t)
+    Right () -> return (Right ())
