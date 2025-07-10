@@ -3,10 +3,11 @@
 module Funk where
 
 import Data.List
+import Funk.Fresh (Env (Env))
 import Funk.Infer (infer)
 import Funk.Parser (parseTerm)
 import Funk.STerm
-import Funk.Solver hiding (envNextIdx)
+import Funk.Solver
 import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token

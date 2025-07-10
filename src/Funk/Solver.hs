@@ -8,22 +8,18 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
+import Funk.Fresh
 import Funk.Infer (Constraint (..))
 import Funk.STerm
 import Funk.Term
 import Funk.Token
 import Text.Parsec
 
-data Env = Env {envNextIdx :: Int}
-
-emptyEnv :: Env
-emptyEnv = Env {envNextIdx = 0}
-
 data SError
   = InfiniteType (Either SourcePos (Located Ident))
   | UnificationError SType SType
 
-newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT Env IO) a}
+newtype Solver a = Solver {unSolver :: ExceptT [SError] Fresh a}
   deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [SError])
 
 instance Applicative Solver where
@@ -38,15 +34,7 @@ instance Applicative Solver where
       (_, Left errs) -> throwError errs
 
 runSolver :: Solver a -> Env -> IO (Either [SError] a)
-runSolver solver env = fst <$> runStateT (runExceptT $ unSolver solver) env
-
-freshUnboundTy :: SourcePos -> Solver STBinding
-freshUnboundTy pos = do
-  env <- get
-  let idx = envNextIdx env
-  ref <- liftIO $ newIORef (Unbound pos idx)
-  put env {envNextIdx = envNextIdx env + 1}
-  return ref
+runSolver solver env = fst <$> runFresh (runExceptT $ unSolver solver) env
 
 prune :: SType -> Solver SType
 prune ty@(TVar ref) = do
@@ -60,6 +48,9 @@ prune ty@(TVar ref) = do
 prune (TArrow t1 t2) = TArrow <$> prune t1 <*> prune t2
 prune (TForall v t) = TForall v <$> prune t
 
+freshUnboundTyS :: SourcePos -> Solver STBinding
+freshUnboundTyS = Solver . lift . freshUnboundTy
+
 unify :: SType -> SType -> Solver ()
 unify t1 t2 = do
   ta <- prune t1
@@ -68,16 +59,16 @@ unify t1 t2 = do
   case (ta, tb) of
     (TVar v1, TVar v2) | v1 == v2 -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
-      fresh <- freshUnboundTy pos
+      fresh <- freshUnboundTyS pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
       let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
       unify t1Subst t2Subst
     (TForall v t, other) -> do
-      fresh <- freshUnboundTy pos
+      fresh <- freshUnboundTyS pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify tSubst other
     (other, TForall v t) -> do
-      fresh <- freshUnboundTy pos
+      fresh <- freshUnboundTyS pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
     (TVar v1, TVar v2) -> do
