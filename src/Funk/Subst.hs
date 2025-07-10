@@ -74,6 +74,10 @@ substTy pty = case pty of
     ref <- freshSkolem i
     st <- substTy t
     return $ TForall ref st
+  TLam i body -> do
+    i' <- freshSkolem i
+    body' <- substTy body
+    return $ TLam i' body'
 
 substTerm :: PTerm -> Subst STerm
 substTerm pterm = case pterm of
@@ -101,11 +105,6 @@ substTerm pterm = case pterm of
     oTy <- freshUnboundTy pos
     return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
   App pos t1 t2 -> App <$> freshUnboundTy pos <*> substTerm t1 <*> substTerm t2
-  TyLam pos i body -> do
-    ty <- freshUnboundTy pos
-    i' <- freshSkolem i
-    body' <- substTerm body
-    return $ TyLam ty i' body'
   TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substTerm t <*> substTy ty
   Let () (PBinding i) mty body scope -> do
     i' <- liftIO $ newIORef (VUnbound i)

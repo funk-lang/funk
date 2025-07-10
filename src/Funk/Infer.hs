@@ -26,10 +26,7 @@ constraints = \case
     let cs' = case mty of
           Just ann -> CEq (TVar iTy) ann : cs
           Nothing -> cs
-    return $ CEq (TVar oTy) (TArrow (TVar iTy) (TVar $ typeOf body)) : cs'
-  TyLam ty v body -> do
-    cs <- constraints body
-    return $ CEq (TVar ty) (TForall v (TVar (typeOf body))) : cs
+    return $ CEq (TVar oTy) (TArrow (TVar iTy) (TVar $ typeOf body)) : cs' 
   TyApp ty body outTy -> do
     pos <- liftIO $ bindingPos ty
     csFun <- constraints body

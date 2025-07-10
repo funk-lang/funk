@@ -43,6 +43,11 @@ showSType (TForall ref t) = do
   bStr <- showTBinding b
   st <- showSType t
   return $ "(\\/ " ++ bStr ++ " . " ++ st ++ ")"
+showSType (TLam ref t) = do
+  b <- readIORef ref
+  bStr <- showTBinding b
+  tStr <- showSType t
+  return $ "(/\\ " ++ bStr ++ " . " ++ tStr ++ ")"
 
 typePos :: SType -> IO SourcePos
 typePos (TVar ref) = do
@@ -53,6 +58,12 @@ typePos (TVar ref) = do
     Unbound pos _ -> return pos
 typePos (TArrow t1 _) = typePos t1
 typePos (TForall ref _) = do
+  b <- readIORef ref
+  case b of
+    Bound t -> typePos t
+    Skolem i _ -> return $ locatedPos i
+    Unbound pos _ -> return pos
+typePos (TLam ref _) = do
   b <- readIORef ref
   case b of
     Bound t -> typePos t
@@ -84,7 +95,6 @@ typeOf = \case
   Var ty _ -> ty
   App ty _ _ -> ty
   Lam (SLam _ ty) _ _ _ -> ty
-  TyLam ty _ _ -> ty
   TyApp ty _ _ -> ty
   Let ty _ _ _ _ -> ty
 
@@ -109,11 +119,6 @@ showSTerm (App _ t1 t2) = do
   s1 <- showSTerm t1
   s2 <- showSTerm t2
   return $ "(" ++ s1 ++ " " ++ s2 ++ ")"
-showSTerm (TyLam _ ref body) = do
-  b <- readIORef ref
-  bStr <- showTBinding b
-  bodyStr <- showSTerm body
-  return $ "(/\\ " ++ bStr ++ " . " ++ bodyStr ++ ")"
 showSTerm (TyApp _ t ty) = do
   s <- showSTerm t
   tyStr <- showSType ty
@@ -125,6 +130,6 @@ showSTerm (Let _ ref _ body scope) = do
   case v of
     VBound t -> do
       tStr <- showSTerm t
-      return $ tStr ++ " = " ++ bodyStr ++ "; " ++ scopeStr ++ ")"
+      return $ tStr ++ " = " ++ bodyStr ++ "; " ++ scopeStr
     VUnbound i ->
-      return $  unIdent (unLocated i) ++ " = " ++ bodyStr ++ "; " ++ scopeStr ++ ")"
+      return $ unIdent (unLocated i) ++ " = " ++ bodyStr ++ "; " ++ scopeStr

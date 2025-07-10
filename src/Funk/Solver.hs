@@ -47,6 +47,7 @@ prune ty@(TVar ref) = do
     _ -> return ty
 prune (TArrow t1 t2) = TArrow <$> prune t1 <*> prune t2
 prune (TForall v t) = TForall v <$> prune t
+prune (TLam v t) = TLam v <$> prune t
 
 freshUnboundTyS :: SourcePos -> Solver STBinding
 freshUnboundTyS = Solver . lift . freshUnboundTy
@@ -97,6 +98,10 @@ unify t1 t2 = do
         Unbound {} -> bindVar v l
         _ -> throwError [UnificationError l (TVar v)]
     (TArrow a1 a2, TArrow b1 b2) -> unify a1 b1 >> unify a2 b2
+    (TLam v1 t1', TLam v2 t2') -> do
+      when (v1 /= v2) $ throwError [UnificationError ta tb]
+      unify t1' t2'
+    _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
 substituteTypeVar old new ty = case ty of
@@ -105,9 +110,27 @@ substituteTypeVar old new ty = case ty of
   TArrow t1 t2 -> TArrow (substituteTypeVar old new t1) (substituteTypeVar old new t2)
   TForall v t | v == old -> TForall v t
   TForall v t -> TForall v (substituteTypeVar old new t)
+  TLam v t -> TLam v (substituteTypeVar old new t)
 
 bindVar :: STBinding -> SType -> Solver ()
-bindVar v ty = liftIO $ writeIORef v (Bound ty)
+bindVar v ty = do
+  occurs <- occursCheck v ty
+  when occurs $ do
+    v' <- liftIO $ readIORef v
+    case v' of
+      Skolem i _ -> throwError [InfiniteType $ Right i]
+      Unbound pos _ -> throwError [InfiniteType $ Left pos]
+      _ -> return ()
+  liftIO $ writeIORef v (Bound ty)
+
+occursCheck :: STBinding -> SType -> Solver Bool
+occursCheck v t = do
+  t' <- prune t
+  case t' of
+    TVar v' -> return (v == v')
+    TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
+    TForall _ th -> occursCheck v th
+    TLam _ th -> occursCheck v th
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go

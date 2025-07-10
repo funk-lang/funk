@@ -56,10 +56,19 @@ forallType = do
   tok TokDot
   TForall v <$> typeExpr
 
+tyLamTerm :: Parser PType
+tyLamTerm = do
+  tok TokTypeLambda
+  Located pos' s <- identTok
+  let v = Located pos' (Ident s)
+  tok TokDot
+  TLam v <$> atomicType
+
 atomicType :: Parser PType
 atomicType =
   choice
     [ try forallType,
+      try tyLamTerm,
       typeVar,
       parensType
     ]
@@ -83,14 +92,6 @@ lambdaTerm = do
   tok TokDot
   Lam pos v ty <$> term
 
-tyLamTerm :: Parser PTerm
-tyLamTerm = do
-  pos <- getPosition
-  tok TokTypeLambda
-  Located pos' s <- identTok
-  let v = Located pos' (Ident s)
-  tok TokDot
-  TyLam pos v <$> term
 
 atomicTerm :: Parser PTerm
 atomicTerm =
@@ -134,7 +135,6 @@ term =
   choice
     [ try letTerm,
       try lambdaTerm,
-      tyLamTerm,
       appTerm
     ]
 
