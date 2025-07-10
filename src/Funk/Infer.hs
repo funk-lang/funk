@@ -38,7 +38,7 @@ constraints = \case
     let cs' = case mty of
           Just ann -> CEq (TVar ty) ann : csBody
           Nothing -> csBody
-    return $ CEq (TVar ty) (TArrow (TVar (typeOf body)) (TVar (typeOf scope))) : cs' ++ csScope
+    return $ CEq (TVar ty) (TVar $ typeOf body) : cs' ++ csScope
 
 infer :: STerm -> IO [Constraint]
 infer term = fst <$> runFresh (constraints term) emptyEnv

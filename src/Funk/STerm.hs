@@ -96,7 +96,7 @@ typeOf = \case
   App ty _ _ -> ty
   Lam (SLam _ ty) _ _ _ -> ty
   TyApp ty _ _ -> ty
-  Let ty _ _ _ _ -> ty
+  Let _ _ _ _ scope -> typeOf scope
 
 showSTerm :: STerm -> IO String
 showSTerm (Var _ ref) = do

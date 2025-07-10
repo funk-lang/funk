@@ -99,8 +99,10 @@ unify t1 t2 = do
         _ -> throwError [UnificationError l (TVar v)]
     (TArrow a1 a2, TArrow b1 b2) -> unify a1 b1 >> unify a2 b2
     (TLam v1 t1', TLam v2 t2') -> do
-      when (v1 /= v2) $ throwError [UnificationError ta tb]
-      unify t1' t2'
+      fresh <- freshUnboundTyS pos
+      let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
+      let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
+      unify t1Subst t2Subst
     _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -110,6 +112,7 @@ substituteTypeVar old new ty = case ty of
   TArrow t1 t2 -> TArrow (substituteTypeVar old new t1) (substituteTypeVar old new t2)
   TForall v t | v == old -> TForall v t
   TForall v t -> TForall v (substituteTypeVar old new t)
+  TLam v t | v == old -> TLam v t
   TLam v t -> TLam v (substituteTypeVar old new t)
 
 bindVar :: STBinding -> SType -> Solver ()
@@ -129,8 +132,8 @@ occursCheck v t = do
   case t' of
     TVar v' -> return (v == v')
     TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
-    TForall _ th -> occursCheck v th
-    TLam _ th -> occursCheck v th
+    TForall v' th -> if v == v' then return False else occursCheck v th
+    TLam v' th -> if v == v' then return False else occursCheck v th
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go
