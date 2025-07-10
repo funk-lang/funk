@@ -7,6 +7,7 @@ import Data.IORef
 import Funk.Term
 import Funk.Token
 import Text.Parsec
+import Text.PrettyPrint
 
 data TBinding
   = Bound (Type STBinding)
@@ -14,7 +15,7 @@ data TBinding
   | Unbound SourcePos Int
 
 showTBinding :: TBinding -> IO String
-showTBinding (Bound ty) = showSType ty
+showTBinding (Bound ty) = render <$> prettySType AtomPrec ty
 showTBinding (Skolem i _) = return $ unIdent (unLocated i)
 showTBinding (Unbound _ idx) = return $ "_" ++ show idx
 
@@ -30,24 +31,24 @@ bindingPos ref = do
 
 type SType = Type STBinding
 
-showSType :: SType -> IO String
-showSType (TVar ref) = do
+prettySType :: Precedence -> SType -> IO Doc
+prettySType _ (TVar ref) = do
   b <- readIORef ref
-  showTBinding b
-showSType (TArrow t1 t2) = do
-  s1 <- showSType t1
-  s2 <- showSType t2
-  return $ "(" ++ s1 ++ " -> " ++ s2 ++ ")"
-showSType (TForall ref t) = do
+  text <$> showTBinding b
+prettySType p (TArrow t1 t2) = do
+  s1 <- prettySType ArrowPrec t1
+  s2 <- prettySType AtomPrec t2
+  return $ parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
+prettySType p (TForall ref t) = do
   b <- readIORef ref
-  bStr <- showTBinding b
-  st <- showSType t
-  return $ "(\\ " ++ bStr ++ " . " ++ st ++ ")"
-showSType (TLam ref t) = do
+  bStr <- text <$> showTBinding b
+  st <- prettySType ForallPrec t
+  return $ parensIf (p > ForallPrec) (text "\\/" <+> bStr <+> text "." <+> st)
+prettySType p (TLam ref t) = do
   b <- readIORef ref
-  bStr <- showTBinding b
-  tStr <- showSType t
-  return $ "(/\\ " ++ bStr ++ " . " ++ tStr ++ ")"
+  bStr <- text <$> showTBinding b
+  tStr <- prettySType LamPrec t
+  return $ parensIf (p > LamPrec) (text "/\\" <+> bStr <+> text "." <+> tStr)
 
 typePos :: SType -> IO SourcePos
 typePos (TVar ref) = do
@@ -73,7 +74,8 @@ typePos (TLam ref _) = do
 data Var = VBound SExpr | VUnbound (Located Ident)
 
 data SLam = SLam
-  { sLamInput :: STBinding,
+  {
+    sLamInput :: STBinding,
     sLamOutput :: STBinding
   }
 
@@ -105,66 +107,83 @@ typeOf = \case
   TyLam ty _ _ -> ty
   BlockExpr ty _ -> ty
 
+data Precedence = AtomPrec | AppPrec | LamPrec | TyAppPrec | TyLamPrec | BlockPrec | ArrowPrec | ForallPrec
+  deriving (Eq, Ord)
+
 showSExpr :: SExpr -> IO String
-showSExpr (Var _ ref) = do
+showSExpr = fmap render . prettySExpr AtomPrec
+
+prettySExpr :: Precedence -> SExpr -> IO Doc
+prettySExpr p (Var _ ref) = do
   v <- readIORef (unSBinding ref)
   case v of
-    VBound t -> showSExpr t
-    VUnbound i -> return $ unIdent (unLocated i)
-showSExpr (Lam ty ref _ body) = do
+    VBound t -> prettySExpr p t
+    VUnbound i -> return $ text (unIdent (unLocated i))
+prettySExpr p (Lam ty ref _ body) = do
   v <- readIORef (unSBinding ref)
-  bodyStr <- showSExpr body
+  bodyDoc <- prettySExpr LamPrec body
   tyBinding <- readIORef $ sLamInput ty
-  tyStr <- showTBinding tyBinding
-  case v of
-    VBound t -> do
-      tStr <- showSExpr t
-      return $ "(\\ " ++ tStr ++ " : " ++ tyStr ++ " . " ++ bodyStr ++ ")"
-    VUnbound i ->
-      return $ "(\\ " ++ unIdent (unLocated i) ++ " : " ++ tyStr ++ " . " ++ bodyStr ++ ")"
-showSExpr (App _ t1 t2) = do
-  s1 <- showSExpr t1
-  s2 <- showSExpr t2
-  return $ "(" ++ s1 ++ " " ++ s2 ++ ")"
-showSExpr (TyApp _ t ty) = do
-  s <- showSExpr t
-  tyStr <- showSType ty
-  return $ "(" ++ s ++ " [" ++ tyStr ++ "])"
-showSExpr (TyLam _ ref body) = do
+  tyDoc <- text <$> showTBinding tyBinding
+  let doc = case v of
+        VBound t -> do
+          tDoc <- prettySExpr AtomPrec t
+          return $ text "\\" <+> tDoc <+> text ":" <+> tyDoc <+> text "." <+> bodyDoc
+        VUnbound i ->
+          return $ text "\\" <+> text (unIdent (unLocated i)) <+> text ":" <+> tyDoc <+> text "." <+> bodyDoc
+  parensIf (p > LamPrec) <$> doc
+prettySExpr p (App _ t1 t2) = do
+  s1 <- prettySExpr AppPrec t1
+  s2 <- prettySExpr AtomPrec t2
+  return $ parensIf (p > AppPrec) (s1 <+> s2)
+prettySExpr p (TyApp _ t ty) = do
+  s <- prettySExpr TyAppPrec t
+  tyDoc <- prettySType AtomPrec ty
+  return $ parensIf (p > TyAppPrec) (s <+> brackets tyDoc)
+prettySExpr p (TyLam _ ref body) = do
   v <- readIORef ref
-  bodyStr <- showSExpr body
-  case v of
-    Bound t -> do
-      tStr <- showSType t
-      return $ "/\\ " ++ tStr ++ " . " ++ bodyStr
-    Skolem i _ ->
-      return $ "/\\ " ++ unIdent (unLocated i) ++ " . " ++ bodyStr
-    Unbound _ idx ->
-      return $ "/\\ _" ++ show idx ++ " . " ++ bodyStr
-showSExpr (BlockExpr _ block) = showSBlock block
+  bodyDoc <- prettySExpr TyLamPrec body
+  let doc = case v of
+        Bound t -> do
+          tDoc <- prettySType AtomPrec t
+          return $ text "/\\" <+> tDoc <+> text "." <+> bodyDoc
+        Skolem i _ ->
+          return $ text "/\\" <+> text (unIdent (unLocated i)) <+> text "." <+> bodyDoc
+        Unbound _ idx ->
+          return $ text "/\\" <+> text ("_" ++ show idx) <+> text "." <+> bodyDoc
+  parensIf (p > TyLamPrec) <$> doc
+
+prettySExpr p (BlockExpr _ block) = do
+  blockDoc <- prettySBlock block
+  return $ parensIf (p > BlockPrec) blockDoc
+
+parensIf :: Bool -> Doc -> Doc
+parensIf True = parens
+parensIf False = id
 
 showSStmt :: SStmt -> IO String
-showSStmt (Let _ ref _ body) = do
+showSStmt = fmap render . prettySStmt
+
+prettySStmt :: SStmt -> IO Doc
+prettySStmt (Let _ ref _ body) = do
   v <- readIORef (unSBinding ref)
-  bodyStr <- showSExpr body
+  bodyDoc <- prettySExpr AtomPrec body
   case v of
     VBound t -> do
-      tStr <- showSExpr t
-      return $ tStr ++ " = " ++ bodyStr ++ ";"
+      tDoc <- prettySExpr AtomPrec t
+      return $ tDoc <+> text "=" <+> bodyDoc Text.PrettyPrint.<> semi
     VUnbound i ->
-      return $ unIdent (unLocated i) ++ " = " ++ bodyStr ++ ";"
-showSStmt (Type ref ty) = do
-  v <- readIORef (unSBinding ref)
-  tyStr <- showSType ty
-  case v of
-    VBound t -> do
-      tStr <- showSExpr t
-      return $ "type " ++ tStr ++ " = " ++ tyStr ++ ";"
-    VUnbound i ->
-      return $ "type " ++ unIdent (unLocated i) ++ " = " ++ tyStr ++ ";"
+      return $ text (unIdent (unLocated i)) <+> text "=" <+> bodyDoc Text.PrettyPrint.<> semi
+prettySStmt (Type sbinding ty) = do
+  sbindingVal <- readIORef sbinding
+  vStr <- showTBinding sbindingVal
+  tyDoc <- prettySType AtomPrec ty
+  return $ text "type" <+> text vStr <+> text "=" <+> tyDoc Text.PrettyPrint.<> semi
 
 showSBlock :: SBlock -> IO String
-showSBlock (Block stmts expr) = do
-  stmtsStr <- mapM showSStmt stmts
-  exprStr <- showSExpr expr
-  return $ "{\n" ++ unlines stmtsStr ++ exprStr ++ "\n}"
+showSBlock = fmap render . prettySBlock
+
+prettySBlock :: SBlock -> IO Doc
+prettySBlock (Block stmts expr) = do
+  stmtsDocs <- mapM prettySStmt stmts
+  exprDoc <- prettySExpr AtomPrec expr
+  return $ vcat stmtsDocs Text.PrettyPrint.$+$ (exprDoc Text.PrettyPrint.<> semi)

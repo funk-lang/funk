@@ -29,7 +29,8 @@ library
         containers,
         mtl,
         optparse-applicative,
-        parsec
+        parsec,
+        pretty
 
 executable funk
     main-is:          Main.hs

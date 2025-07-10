@@ -127,11 +127,10 @@ substStmt (Let () (PBinding i) mty body) = do
     Nothing -> return Nothing
   body' <- substExpr body
   return $ Let iTy (SBinding i') tyAnn body'
-substStmt (Type (PBinding i) pty) = do
+substStmt (Type i pty) = do
   sty <- substTy pty
-  ref <- liftIO $ newIORef (Bound sty)
-  modify $ \env -> env {envTys = Map.insert (unLocated i) ref (envTys env)}
-  return $ Type (SBinding (error "Cannot have type binding on RHS of type alias")) sty
+  ref <- freshSkolem i
+  return $ Type ref sty
 
 substBlock :: PBlock -> Subst SBlock
 substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e

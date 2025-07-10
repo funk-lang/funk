@@ -127,7 +127,7 @@ letStmt = do
 typeStmt :: Parser PStmt
 typeStmt = do
   tok TokType
-  v <- fmap (PBinding . fmap Ident) identTok
+  v <- fmap Ident <$> identTok
   tok TokEq
   ty <- typeExpr <* tok TokSemicolon
   return $ Type v ty

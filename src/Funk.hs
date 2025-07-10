@@ -15,6 +15,7 @@ import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Error
+import qualified Text.PrettyPrint as Pretty
 
 newtype Options = Options
   { optionsFilePath :: FilePath
@@ -31,10 +32,10 @@ run = do
   res <- tryRun input
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
-    Right sts -> do
-      showSExpr sts >>= putStrLn
+    Right block -> do
+      showSBlock block >>= putStrLn
 
-tryRun :: String -> IO (Either Error SExpr)
+tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
   let result = tokenize input >>= parseTopLevel
   case result of
@@ -48,7 +49,7 @@ tryRun input = do
           cs <- infer expr
           solveConstraints cs (Env $ envNextIdx env) >>= \case
             Left errs -> return $ Left (SolverError errs)
-            Right () -> return $ Right expr
+            Right () -> return $ Right block
 
 data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
 
@@ -101,8 +102,8 @@ showSErrorPretty err input =
           showErrorLine (locatedPos ident) input $
             "Infinite type: `" ++ unIdent (unLocated ident) ++ "`"
     UnificationError t1 t2 -> do
-      t1Str <- showSType t1
-      t2Str <- showSType t2
+      t1Str <- Pretty.render <$> prettySType AtomPrec t1
+      t2Str <- Pretty.render <$> prettySType AtomPrec t2
       return $
         "Unification error: cannot unify types `"
           ++ t1Str

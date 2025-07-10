@@ -30,6 +30,6 @@ data Expr b
   | TyLam (BTyLam b) (BTVar b) (Expr b)
   | BlockExpr (BBlock b) (Block b)
 
-data Stmt b = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b) | Type b (Type (BTVar b))
+data Stmt b = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b) | Type (BTVar b) (Type (BTVar b))
 
 data Block b = Block [Stmt b] (Expr b)
