@@ -18,6 +18,7 @@ class Binding b where
   type BApp b
   type BTyLam b
   type BTyApp b
+  type BLet b
 
 data Term b
   = Var (BVar b) b
@@ -25,3 +26,4 @@ data Term b
   | App (BApp b) (Term b) (Term b)
   | TyLam (BTyLam b) (BTVar b) (Term b)
   | TyApp (BTyApp b) (Term b) (Type (BTVar b))
+  | Let (BLet b) b (Maybe (Type (BTVar b))) (Term b) (Term b)

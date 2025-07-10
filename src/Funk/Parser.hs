@@ -23,6 +23,7 @@ instance Binding PBinding where
   type BApp PBinding = SourcePos
   type BTyLam PBinding = SourcePos
   type BTyApp PBinding = SourcePos
+  type BLet PBinding = ()
 
 type PTerm = Term PBinding
 
@@ -119,10 +120,20 @@ appTerm = do
           )
         <|> return f
 
+letTerm :: Parser PTerm
+letTerm = do
+  v <- fmap (PBinding . fmap Ident) identTok
+  ty <- optionMaybe (tok TokColon *> typeExpr)
+  tok TokEq
+  body <- term <* tok TokSemicolon
+  scope <- term
+  return $ Let () v ty body scope
+
 term :: Parser PTerm
 term =
   choice
-    [ try lambdaTerm,
+    [ try letTerm,
+      try lambdaTerm,
       tyLamTerm,
       appTerm
     ]

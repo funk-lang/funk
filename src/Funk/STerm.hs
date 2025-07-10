@@ -1,5 +1,5 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Funk.STerm where
 
@@ -75,6 +75,7 @@ instance Binding SBinding where
   type BApp SBinding = STBinding
   type BTyLam SBinding = STBinding
   type BTyApp SBinding = STBinding
+  type BLet SBinding = STBinding
 
 type STerm = Term SBinding
 
@@ -85,6 +86,7 @@ typeOf = \case
   Lam (SLam _ ty) _ _ _ -> ty
   TyLam ty _ _ -> ty
   TyApp ty _ _ -> ty
+  Let ty _ _ _ _ -> ty
 
 showSTerm :: STerm -> IO String
 showSTerm (Var _ ref) = do
@@ -116,3 +118,13 @@ showSTerm (TyApp _ t ty) = do
   s <- showSTerm t
   tyStr <- showSType ty
   return $ "(" ++ s ++ " [" ++ tyStr ++ "])"
+showSTerm (Let _ ref _ body scope) = do
+  v <- readIORef (unSBinding ref)
+  bodyStr <- showSTerm body
+  scopeStr <- showSTerm scope
+  case v of
+    VBound t -> do
+      tStr <- showSTerm t
+      return $ tStr ++ " = " ++ bodyStr ++ "; " ++ scopeStr ++ ")"
+    VUnbound i ->
+      return $  unIdent (unLocated i) ++ " = " ++ bodyStr ++ "; " ++ scopeStr ++ ")"

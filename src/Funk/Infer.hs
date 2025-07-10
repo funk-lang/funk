@@ -35,6 +35,13 @@ constraints = \case
     csFun <- constraints body
     iTy <- freshUnboundTy pos
     return $ CEq (TVar (typeOf body)) (TForall iTy outTy) : csFun
+  Let ty _ mty body scope -> do
+    csBody <- constraints body
+    csScope <- constraints scope
+    let cs' = case mty of
+          Just ann -> CEq (TVar ty) ann : csBody
+          Nothing -> csBody
+    return $ CEq (TVar ty) (TArrow (TVar (typeOf body)) (TVar (typeOf scope))) : cs' ++ csScope
 
 infer :: STerm -> IO [Constraint]
 infer term = fst <$> runFresh (constraints term) emptyEnv

@@ -107,6 +107,20 @@ substTerm pterm = case pterm of
     body' <- substTerm body
     return $ TyLam ty i' body'
   TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substTerm t <*> substTy ty
+  Let () (PBinding i) mty body scope -> do
+    i' <- liftIO $ newIORef (VUnbound i)
+    iTy <- freshUnboundTy (locatedPos i)
+    modify $ \env ->
+      env
+        { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
+          envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
+        }
+    tyAnn <- case mty of
+      Just ty -> Just <$> substTy ty
+      Nothing -> return Nothing
+    body' <- substTerm body
+    scope' <- substTerm scope
+    return $ Let iTy (SBinding i') tyAnn body' scope'
 
 subst :: PTerm -> IO (Either [(Located Ident)] (STerm), Env)
 subst = runSubst . substTerm

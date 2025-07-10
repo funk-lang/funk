@@ -107,23 +107,7 @@ substituteTypeVar old new ty = case ty of
   TForall v t -> TForall v (substituteTypeVar old new t)
 
 bindVar :: STBinding -> SType -> Solver ()
-bindVar v ty = do
-  occurs <- occursCheck v ty
-  when occurs $ do
-    v' <- liftIO $ readIORef v
-    case v' of
-      Skolem i _ -> throwError [InfiniteType $ Right i]
-      Unbound pos _ -> throwError [InfiniteType $ Left pos]
-      _ -> return ()
-  liftIO $ writeIORef v (Bound ty)
-
-occursCheck :: STBinding -> SType -> Solver Bool
-occursCheck v t = do
-  t' <- prune t
-  case t' of
-    TVar v' -> return (v == v')
-    TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
-    TForall _ th -> occursCheck v th
+bindVar v ty = liftIO $ writeIORef v (Bound ty)
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go

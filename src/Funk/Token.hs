@@ -27,6 +27,8 @@ data Token
   | TokRParen
   | TokLBracket
   | TokRBracket
+  | TokEq
+  | TokSemicolon
   deriving (Eq)
 
 instance Show Token where
@@ -42,6 +44,8 @@ instance Show Token where
     TokRParen -> "')'"
     TokLBracket -> "'['"
     TokRBracket -> "']'"
+    TokEq -> "'='"
+    TokSemicolon -> "';'"
 
 token :: Parser (Located Token)
 token = do
@@ -58,6 +62,8 @@ token = do
         TokRParen <$ char ')',
         TokLBracket <$ char '[',
         TokRBracket <$ char ']',
+        TokEq <$ char '=',
+        TokSemicolon <$ char ';',
         identToken
       ]
   return $ Located pos t
