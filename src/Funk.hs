@@ -1,15 +1,18 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Funk where
 
 import Data.List
 import Funk.Parser (parseTerm)
-import Funk.Solver
+import Funk.STerm
+import Funk.Solver hiding (envNextIdx)
+import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Error
-import Funk.STerm
 
 newtype Options = Options
   { optionsFilePath :: FilePath
@@ -36,12 +39,15 @@ tryRun input = do
   case result of
     Left err -> return $ Left (ParserError err)
     Right term -> do
-      res <- solvePTerm term
+      (res, env) <- subst term
       case res of
-        Left errs -> return $ Left (SolverError errs)
-        Right st -> return $ Right st
+        Left errs -> return $ Left (SubstError errs)
+        Right t ->
+          solvePTerm t (Env (envNextIdx env)) >>= \case
+            Left errs -> return $ Left (SolverError errs)
+            Right st -> return $ Right st
 
-data Error = ParserError ParseError | SolverError [SError]
+data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
 
 showParseErrorPretty :: ParseError -> String -> String
 showParseErrorPretty err input =
@@ -85,10 +91,6 @@ showParseErrorPretty err input =
 showSErrorPretty :: SError -> String -> IO String
 showSErrorPretty err input =
   case err of
-    MissingIdent i ->
-      return $
-        showErrorLine (locatedPos i) input $
-          "Unknown identifier `" ++ unIdent (unLocated i) ++ "`"
     InfiniteType i -> case i of
       Left pos -> return $ showErrorLine pos input "Infinite type detected"
       Right ident ->
@@ -107,6 +109,8 @@ showSErrorPretty err input =
 
 showErrorPretty :: Error -> String -> IO String
 showErrorPretty (ParserError err) input = return $ showParseErrorPretty err input
+showErrorPretty (SubstError errs) input =
+  return $ unlines $ map (\i -> showErrorLine (locatedPos i) input ("Unknown identifier: " ++ unIdent (unLocated i))) errs
 showErrorPretty (SolverError errs) input = unlines <$> mapM (`showSErrorPretty` input) errs
 
 showErrorLine :: SourcePos -> String -> String -> String

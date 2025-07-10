@@ -14,6 +14,7 @@ library
         Funk.Parser
         Funk.Solver
         Funk.STerm
+        Funk.Subst
         Funk.Term
         Funk.Token
 

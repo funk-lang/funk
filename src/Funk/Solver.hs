@@ -8,27 +8,18 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Funk.Parser
 import Funk.STerm
 import Funk.Term
 import Funk.Token
 import Text.Parsec
 
-data Env = Env
-  { envVars :: Map Ident SBinding,
-    envTys :: Map Ident STBinding,
-    envVarTypes :: Map Ident STBinding,
-    envNextIdx :: Int
-  }
+data Env = Env {envNextIdx :: Int}
 
 emptyEnv :: Env
-emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
+emptyEnv = Env {envNextIdx = 0}
 
 data SError
-  = MissingIdent (Located Ident)
-  | InfiniteType (Either SourcePos (Located Ident))
+  = InfiniteType (Either SourcePos (Located Ident))
   | UnificationError SType SType
 
 newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT Env IO) a}
@@ -45,20 +36,8 @@ instance Applicative Solver where
       (Left errs, _) -> throwError errs
       (_, Left errs) -> throwError errs
 
-runSolver :: Solver a -> IO (Either [SError] a)
-runSolver solver = fst <$> runStateT (runExceptT $ unSolver solver) emptyEnv
-
-freshSkolem :: Located Ident -> Solver STBinding
-freshSkolem i = do
-  env <- get
-  let idx = envNextIdx env
-  ref <- liftIO . newIORef $ Skolem i idx
-  put
-    env
-      { envTys = Map.insert (unLocated i) ref $ envTys env,
-        envNextIdx = envNextIdx env + 1
-      }
-  return ref
+runSolver :: Solver a -> Env -> IO (Either [SError] a)
+runSolver solver env = fst <$> runStateT (runExceptT $ unSolver solver) env
 
 freshUnboundTy :: SourcePos -> Solver STBinding
 freshUnboundTy pos = do
@@ -67,55 +46,6 @@ freshUnboundTy pos = do
   ref <- liftIO $ newIORef (Unbound pos idx)
   put env {envNextIdx = envNextIdx env + 1}
   return ref
-
-substTy :: PType -> Solver SType
-substTy pty = case pty of
-  TVar i -> do
-    env <- get
-    case Map.lookup (unLocated i) (envTys env) of
-      Just ref -> return $ TVar ref
-      Nothing -> throwError [MissingIdent i]
-  TArrow t1 t2 -> TArrow <$> substTy t1 <*> substTy t2
-  TForall i t -> do
-    ref <- freshSkolem i
-    st <- substTy t
-    return $ TForall ref st
-
-substTerm :: PTerm -> Solver STerm
-substTerm pterm = case pterm of
-  Var _ (PBinding i) -> do
-    env <- get
-    termBinding <- case Map.lookup (unLocated i) (envVars env) of
-      Just ref -> return ref
-      Nothing -> throwError [MissingIdent i]
-    typeBinding <- case Map.lookup (unLocated i) (envVarTypes env) of
-      Just ty -> return ty
-      Nothing -> throwError [MissingIdent i]
-    return $ Var typeBinding termBinding
-  Lam pos (PBinding i) mty body -> do
-    i' <- liftIO $ newIORef (VUnbound i)
-    iTy <- freshUnboundTy pos
-    modify $ \env ->
-      env
-        { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
-          envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
-        }
-    tyAnn <- case mty of
-      Just ty -> Just <$> substTy ty
-      Nothing -> return Nothing
-    body' <- substTerm body
-    oTy <- freshUnboundTy pos
-    return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
-  App pos t1 t2 -> App <$> freshUnboundTy pos <*> substTerm t1 <*> substTerm t2
-  TyLam pos i body -> do
-    ty <- freshUnboundTy pos
-    i' <- freshSkolem i
-    body' <- substTerm body
-    return $ TyLam ty i' body'
-  TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substTerm t <*> substTy ty
-
-subst :: PTerm -> IO (Either [SError] STerm)
-subst = runSolver . substTerm
 
 data Constraint = CEq SType SType
 
@@ -245,13 +175,9 @@ solve t = do
   where
     go (CEq t1 t2) = unify t1 t2
 
-solvePTerm :: PTerm -> IO (Either [SError] STerm)
-solvePTerm pterm = do
-  res <- subst pterm
-  case res of
+solvePTerm :: STerm -> Env -> IO (Either [SError] STerm)
+solvePTerm t env = do
+  res' <- runSolver (solve t) env
+  case res' of
     Left errs -> return (Left errs)
-    Right t -> do
-      res' <- runSolver (solve t)
-      case res' of
-        Left errs -> return (Left errs)
-        Right () -> return (Right t)
+    Right () -> return (Right t)
