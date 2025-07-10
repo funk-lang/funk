@@ -15,12 +15,13 @@ import Funk.Term
 import Funk.Token
 import Text.Parsec
 
-data Env = Env
-  { envVars :: Map Ident SBinding,
-    envTys :: Map Ident STBinding,
-    envVarTypes :: Map Ident STBinding,
-    envNextIdx :: Int
-  }
+data Env =
+  Env
+    { envVars :: Map Ident SBinding,
+      envTys :: Map Ident STBinding,
+      envVarTypes :: Map Ident STBinding,
+      envNextIdx :: Int
+    }
 
 emptyEnv :: Env
 emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
@@ -79,8 +80,8 @@ substTy pty = case pty of
     body' <- substTy body
     return $ TLam i' body'
 
-substTerm :: PTerm -> Subst STerm
-substTerm pterm = case pterm of
+substExpr :: PExpr -> Subst SExpr
+substExpr pexpr = case pexpr of
   Var _ (PBinding i) -> do
     env <- get
     termBinding <- case Map.lookup (unLocated i) (envVars env) of
@@ -101,25 +102,37 @@ substTerm pterm = case pterm of
     tyAnn <- case mty of
       Just ty -> Just <$> substTy ty
       Nothing -> return Nothing
-    body' <- substTerm body
+    body' <- substExpr body
     oTy <- freshUnboundTy pos
     return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
-  App pos t1 t2 -> App <$> freshUnboundTy pos <*> substTerm t1 <*> substTerm t2
-  TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substTerm t <*> substTy ty
-  Let () (PBinding i) mty body scope -> do
-    i' <- liftIO $ newIORef (VUnbound i)
-    iTy <- freshUnboundTy (locatedPos i)
-    modify $ \env ->
-      env
-        { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
-          envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
-        }
-    tyAnn <- case mty of
-      Just ty -> Just <$> substTy ty
-      Nothing -> return Nothing
-    body' <- substTerm body
-    scope' <- substTerm scope
-    return $ Let iTy (SBinding i') tyAnn body' scope'
+  App pos t1 t2 -> App <$> freshUnboundTy pos <*> substExpr t1 <*> substExpr t2
+  TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substExpr t <*> substTy ty
+  TyLam pos _ body -> do
+    ty <- freshUnboundTy pos
+    body' <- substExpr body
+    return $ TyLam ty ty body'
+  BlockExpr pos block -> BlockExpr <$> freshUnboundTy pos <*> substBlock block
 
-subst :: PTerm -> IO (Either [(Located Ident)] (STerm), Env)
-subst = runSubst . substTerm
+substStmt :: PStmt -> Subst SStmt
+substStmt (Let () (PBinding i) mty body) = do
+  i' <- liftIO $ newIORef (VUnbound i)
+  iTy <- freshUnboundTy (locatedPos i)
+  modify $ \env ->
+    env
+      { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
+        envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
+      }
+  tyAnn <- case mty of
+    Just ty -> Just <$> substTy ty
+    Nothing -> return Nothing
+  body' <- substExpr body
+  return $ Let iTy (SBinding i') tyAnn body'
+substStmt (Type (PBinding i) pty) = do
+  sty <- substTy pty
+  ref <- liftIO $ newIORef (Bound sty)
+  modify $ \env -> env {envTys = Map.insert (unLocated i) ref (envTys env)}
+  return $ Type (SBinding (error "Cannot have type binding on RHS of type alias")) sty
+
+substBlock :: PBlock -> Subst SBlock
+substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e
+

@@ -42,7 +42,7 @@ showSType (TForall ref t) = do
   b <- readIORef ref
   bStr <- showTBinding b
   st <- showSType t
-  return $ "(\\/ " ++ bStr ++ " . " ++ st ++ ")"
+  return $ "(\\ " ++ bStr ++ " . " ++ st ++ ")"
 showSType (TLam ref t) = do
   b <- readIORef ref
   bStr <- showTBinding b
@@ -70,7 +70,7 @@ typePos (TLam ref _) = do
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
 
-data Var = VBound STerm | VUnbound (Located Ident)
+data Var = VBound SExpr | VUnbound (Located Ident)
 
 data SLam = SLam
   { sLamInput :: STBinding,
@@ -87,49 +87,84 @@ instance Binding SBinding where
   type BTyLam SBinding = STBinding
   type BTyApp SBinding = STBinding
   type BLet SBinding = STBinding
+  type BBlock SBinding = STBinding
 
-type STerm = Term SBinding
+type SExpr = Expr SBinding
+type SStmt = Stmt SBinding
+type SBlock = Block SBinding
 
-typeOf :: STerm -> STBinding
+blockExpr :: SBlock -> SExpr
+blockExpr (Block _ e) = e
+
+typeOf :: SExpr -> STBinding
 typeOf = \case
   Var ty _ -> ty
   App ty _ _ -> ty
   Lam (SLam _ ty) _ _ _ -> ty
   TyApp ty _ _ -> ty
-  Let _ _ _ _ scope -> typeOf scope
+  TyLam ty _ _ -> ty
+  BlockExpr ty _ -> ty
 
-showSTerm :: STerm -> IO String
-showSTerm (Var _ ref) = do
+showSExpr :: SExpr -> IO String
+showSExpr (Var _ ref) = do
   v <- readIORef (unSBinding ref)
   case v of
-    VBound t -> showSTerm t
+    VBound t -> showSExpr t
     VUnbound i -> return $ unIdent (unLocated i)
-showSTerm (Lam ty ref _ body) = do
+showSExpr (Lam ty ref _ body) = do
   v <- readIORef (unSBinding ref)
-  bodyStr <- showSTerm body
+  bodyStr <- showSExpr body
   tyBinding <- readIORef $ sLamInput ty
   tyStr <- showTBinding tyBinding
   case v of
     VBound t -> do
-      tStr <- showSTerm t
+      tStr <- showSExpr t
       return $ "(\\ " ++ tStr ++ " : " ++ tyStr ++ " . " ++ bodyStr ++ ")"
     VUnbound i ->
       return $ "(\\ " ++ unIdent (unLocated i) ++ " : " ++ tyStr ++ " . " ++ bodyStr ++ ")"
-showSTerm (App _ t1 t2) = do
-  s1 <- showSTerm t1
-  s2 <- showSTerm t2
+showSExpr (App _ t1 t2) = do
+  s1 <- showSExpr t1
+  s2 <- showSExpr t2
   return $ "(" ++ s1 ++ " " ++ s2 ++ ")"
-showSTerm (TyApp _ t ty) = do
-  s <- showSTerm t
+showSExpr (TyApp _ t ty) = do
+  s <- showSExpr t
   tyStr <- showSType ty
   return $ "(" ++ s ++ " [" ++ tyStr ++ "])"
-showSTerm (Let _ ref _ body scope) = do
+showSExpr (TyLam _ ref body) = do
+  v <- readIORef ref
+  bodyStr <- showSExpr body
+  case v of
+    Bound t -> do
+      tStr <- showSType t
+      return $ "/\\ " ++ tStr ++ " . " ++ bodyStr
+    Skolem i _ ->
+      return $ "/\\ " ++ unIdent (unLocated i) ++ " . " ++ bodyStr
+    Unbound _ idx ->
+      return $ "/\\ _" ++ show idx ++ " . " ++ bodyStr
+showSExpr (BlockExpr _ block) = showSBlock block
+
+showSStmt :: SStmt -> IO String
+showSStmt (Let _ ref _ body) = do
   v <- readIORef (unSBinding ref)
-  bodyStr <- showSTerm body
-  scopeStr <- showSTerm scope
+  bodyStr <- showSExpr body
   case v of
     VBound t -> do
-      tStr <- showSTerm t
-      return $ tStr ++ " = " ++ bodyStr ++ "; " ++ scopeStr
+      tStr <- showSExpr t
+      return $ tStr ++ " = " ++ bodyStr ++ ";"
     VUnbound i ->
-      return $ unIdent (unLocated i) ++ " = " ++ bodyStr ++ "; " ++ scopeStr
+      return $ unIdent (unLocated i) ++ " = " ++ bodyStr ++ ";"
+showSStmt (Type ref ty) = do
+  v <- readIORef (unSBinding ref)
+  tyStr <- showSType ty
+  case v of
+    VBound t -> do
+      tStr <- showSExpr t
+      return $ "type " ++ tStr ++ " = " ++ tyStr ++ ";"
+    VUnbound i ->
+      return $ "type " ++ unIdent (unLocated i) ++ " = " ++ tyStr ++ ";"
+
+showSBlock :: SBlock -> IO String
+showSBlock (Block stmts expr) = do
+  stmtsStr <- mapM showSStmt stmts
+  exprStr <- showSExpr expr
+  return $ "{\n" ++ unlines stmtsStr ++ exprStr ++ "\n}"

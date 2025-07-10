@@ -1,3 +1,6 @@
-true : \/ a . a -> a -> a = \x . \y . x;
+type Bool = \/ a . a -> a -> a;
+
+true : Bool = \ x . \ y . x;
+false : Bool = \ x . \ y . y;
 
 true

@@ -24,8 +24,13 @@ instance Binding PBinding where
   type BTyLam PBinding = SourcePos
   type BTyApp PBinding = SourcePos
   type BLet PBinding = ()
+  type BBlock PBinding = SourcePos
 
-type PTerm = Term PBinding
+type PExpr = Expr PBinding
+
+type PStmt = Stmt PBinding
+
+type PBlock = Block PBinding
 
 tok :: Token -> Parser ()
 tok expected =
@@ -56,19 +61,10 @@ forallType = do
   tok TokDot
   TForall v <$> typeExpr
 
-tyLamTerm :: Parser PType
-tyLamTerm = do
-  tok TokTypeLambda
-  Located pos' s <- identTok
-  let v = Located pos' (Ident s)
-  tok TokDot
-  TLam v <$> atomicType
-
 atomicType :: Parser PType
 atomicType =
   choice
     [ try forallType,
-      try tyLamTerm,
       typeVar,
       parensType
     ]
@@ -76,33 +72,32 @@ atomicType =
 typeExpr :: Parser PType
 typeExpr = chainr1 atomicType (tok TokArrow $> TArrow)
 
-varTerm :: Parser PTerm
-varTerm = Var () . PBinding . fmap Ident <$> identTok
+varExpr :: Parser PExpr
+varExpr = Var () . PBinding . fmap Ident <$> identTok
 
-parensTerm :: Parser PTerm
-parensTerm = tok TokLParen *> term <* tok TokRParen
+parensExpr :: Parser PExpr
+parensExpr = tok TokLParen *> expr <* tok TokRParen
 
-lambdaTerm :: Parser PTerm
-lambdaTerm = do
+lambdaExpr :: Parser PExpr
+lambdaExpr = do
   pos <- getPosition
   tok TokLambda
   Located pos' s <- identTok
   let v = PBinding $ Located pos' (Ident s)
   ty <- optionMaybe (tok TokColon *> typeExpr)
   tok TokDot
-  Lam pos v ty <$> term
+  Lam pos v ty <$> expr
 
-
-atomicTerm :: Parser PTerm
-atomicTerm =
+atomicExpr :: Parser PExpr
+atomicExpr =
   choice
-    [ varTerm,
-      parensTerm
+    [ varExpr,
+      parensExpr
     ]
 
-appTerm :: Parser PTerm
-appTerm = do
-  f0 <- atomicTerm
+appExpr :: Parser PExpr
+appExpr = do
+  f0 <- atomicExpr
   rest f0
   where
     rest f =
@@ -116,27 +111,48 @@ appTerm = do
         <|> try
           ( do
               pos <- getPosition
-              arg <- atomicTerm
+              arg <- atomicExpr
               rest (App pos f arg)
           )
         <|> return f
 
-letTerm :: Parser PTerm
-letTerm = do
+letStmt :: Parser PStmt
+letStmt = do
   v <- fmap (PBinding . fmap Ident) identTok
   ty <- optionMaybe (tok TokColon *> typeExpr)
   tok TokEq
-  body <- term <* tok TokSemicolon
-  scope <- term
-  return $ Let () v ty body scope
+  body <- expr <* tok TokSemicolon
+  return $ Let () v ty body
 
-term :: Parser PTerm
-term =
+typeStmt :: Parser PStmt
+typeStmt = do
+  tok TokType
+  v <- fmap (PBinding . fmap Ident) identTok
+  tok TokEq
+  ty <- typeExpr <* tok TokSemicolon
+  return $ Type v ty
+
+stmt :: Parser PStmt
+stmt = choice [try letStmt, typeStmt]
+
+blockExpr :: Parser PExpr
+blockExpr = do
+  pos <- getPosition
+  tok TokLBrace
+  stmts <- many (try stmt)
+  e <- expr
+  tok TokRBrace
+  return $ BlockExpr pos (Block stmts e)
+
+expr :: Parser PExpr
+expr =
   choice
-    [ try letTerm,
-      try lambdaTerm,
-      appTerm
+    [ try lambdaExpr,
+      appExpr,
+      blockExpr
     ]
 
-parseTerm :: [Located Token] -> Either ParseError PTerm
-parseTerm = parse (term <* eof) "<input>"
+parseTopLevel :: [Located Token] -> Either ParseError PBlock
+parseTopLevel = parse (block <* eof) "<input>"
+  where
+    block = Block <$> many (try stmt) <*> expr

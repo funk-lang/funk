@@ -20,10 +20,16 @@ class Binding b where
   type BTyLam b
   type BTyApp b
   type BLet b
+  type BBlock b
 
-data Term b
+data Expr b
   = Var (BVar b) b
-  | Lam (BLam b) b (Maybe (Type (BTVar b))) (Term b)
-  | App (BApp b) (Term b) (Term b)
-  | TyApp (BTyApp b) (Term b) (Type (BTVar b))
-  | Let (BLet b) b (Maybe (Type (BTVar b))) (Term b) (Term b)
+  | Lam (BLam b) b (Maybe (Type (BTVar b))) (Expr b)
+  | App (BApp b) (Expr b) (Expr b)
+  | TyApp (BTyApp b) (Expr b) (Type (BTVar b))
+  | TyLam (BTyLam b) (BTVar b) (Expr b)
+  | BlockExpr (BBlock b) (Block b)
+
+data Stmt b = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b) | Type b (Type (BTVar b))
+
+data Block b = Block [Stmt b] (Expr b)

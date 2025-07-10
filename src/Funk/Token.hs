@@ -3,6 +3,7 @@
 
 module Funk.Token where
 
+import Control.Monad (void)
 import Text.Parsec hiding (token)
 import Text.Parsec.String
 
@@ -27,8 +28,11 @@ data Token
   | TokRParen
   | TokLBracket
   | TokRBracket
+  | TokLBrace
+  | TokRBrace
   | TokEq
   | TokSemicolon
+  | TokType
   deriving (Eq)
 
 instance Show Token where
@@ -38,14 +42,17 @@ instance Show Token where
     TokTypeLambda -> "'/\\'"
     TokForall -> "'\\/'"
     TokArrow -> "'->'"
-    TokDot -> "'.'"
-    TokColon -> "':'"
+    TokDot -> "."
+    TokColon -> ":"
     TokLParen -> "'('"
     TokRParen -> "')'"
     TokLBracket -> "'['"
-    TokRBracket -> "']'"
+    TokRBracket -> "]"
+    TokLBrace -> "'{'"
+    TokRBrace -> "'}'"
     TokEq -> "'='"
-    TokSemicolon -> "';'"
+    TokSemicolon -> ";"
+    TokType -> "'type'"
 
 token :: Parser (Located Token)
 token = do
@@ -62,6 +69,8 @@ token = do
         TokRParen <$ char ')',
         TokLBracket <$ char '[',
         TokRBracket <$ char ']',
+        TokLBrace <$ char '{',
+        TokRBrace <$ char '}',
         TokEq <$ char '=',
         TokSemicolon <$ char ';',
         identToken
@@ -71,7 +80,13 @@ token = do
     identToken = do
       c <- letter <|> char '_'
       cs <- many (alphaNum <|> char '_')
-      return $ TokIdent (c : cs)
+      return $ case c : cs of
+        "type" -> TokType
+        s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]
-tokenize = parse (spaces *> many (token <* spaces) <* eof) ""
+tokenize = parse (many (token <* whitespace) <* eof) ""
+  where
+    whitespace = skipMany (skipSpace <|> skipLineComment)
+    skipSpace = void $ oneOf " \t\r\n"
+    skipLineComment = void $ try (string "--") *> skipMany (noneOf "\n")

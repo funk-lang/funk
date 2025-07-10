@@ -5,7 +5,7 @@ module Funk where
 import Data.List
 import Funk.Fresh (Env (Env))
 import Funk.Infer (infer)
-import Funk.Parser (parseTerm)
+import Funk.Parser (parseTopLevel)
 import Funk.STerm
 import Funk.Solver
 import Funk.Subst hiding (Env)
@@ -31,24 +31,24 @@ run = do
   res <- tryRun input
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
-    Right st -> do
-      stStr <- showSTerm st
-      putStrLn stStr
+    Right sts -> do
+      showSExpr sts >>= putStrLn
 
-tryRun :: String -> IO (Either Error STerm)
+tryRun :: String -> IO (Either Error SExpr)
 tryRun input = do
-  let result = tokenize input >>= parseTerm
+  let result = tokenize input >>= parseTopLevel
   case result of
     Left err -> return $ Left (ParserError err)
-    Right term -> do
-      (res, env) <- subst term
+    Right topLevel -> do
+      (res, env) <- runSubst (substBlock topLevel)
       case res of
         Left errs -> return $ Left (SubstError errs)
-        Right t -> do
-          cs <- infer t
+        Right block -> do
+          let expr = blockExpr block
+          cs <- infer expr
           solveConstraints cs (Env $ envNextIdx env) >>= \case
             Left errs -> return $ Left (SolverError errs)
-            Right () -> return $ Right t
+            Right () -> return $ Right expr
 
 data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
 
@@ -70,7 +70,7 @@ showParseErrorPretty err input =
         [x] -> "expecting " ++ x
         xs ->
           "expecting "
-            ++ intercalate ", " (reverse . tail $ reverse xs)
+            ++ intercalate ", " (reverse . drop 1 $ reverse xs)
             ++ " or "
             ++ last xs
       msg =
