@@ -3,4 +3,8 @@ type Bool = \/ a . a -> a -> a;
 true : Bool = \ x . \ y . x;
 false : Bool = \ x . \ y . y;
 
-true
+data User {
+  is_cool: Bool
+}
+
+User { is_cool: true }

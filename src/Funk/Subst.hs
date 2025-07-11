@@ -4,6 +4,7 @@
 
 module Funk.Subst where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
@@ -15,13 +16,13 @@ import Funk.Term
 import Funk.Token
 import Text.Parsec
 
-data Env =
-  Env
-    { envVars :: Map Ident SBinding,
-      envTys :: Map Ident STBinding,
-      envVarTypes :: Map Ident STBinding,
-      envNextIdx :: Int
-    }
+data Env
+  = Env
+  { envVars :: Map Ident SBinding,
+    envTys :: Map Ident STBinding,
+    envVarTypes :: Map Ident STBinding,
+    envNextIdx :: Int
+  }
 
 emptyEnv :: Env
 emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
@@ -80,6 +81,10 @@ substTy pty = case pty of
     body' <- substTy body
     return $ TLam i' body'
 
+extractPBinding :: PExpr -> PBinding
+extractPBinding (Var _ pbinding) = pbinding
+extractPBinding _ = error "Expected Var for record creation"
+
 substExpr :: PExpr -> Subst SExpr
 substExpr pexpr = case pexpr of
   Var _ (PBinding i) -> do
@@ -112,6 +117,25 @@ substExpr pexpr = case pexpr of
     body' <- substExpr body
     return $ TyLam ty ty body'
   BlockExpr pos block -> BlockExpr <$> freshUnboundTy pos <*> substBlock block
+  RecordType () (PBinding i) fields -> do
+    sfields <- forM fields $ \(f, ty) -> do
+      sty <- substTy ty
+      return (f, sty)
+    i' <- liftIO $ newIORef (VUnbound i)
+    iTy <- freshUnboundTy (locatedPos i)
+    modify $ \env ->
+      env
+        { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
+          envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
+        }
+    return $ RecordType iTy (SBinding i') sfields
+  RecordCreation _ v fields -> do
+    sfields <- forM fields $ \(f, e) -> do
+      sexpr <- substExpr e
+      return (f, sexpr)
+    sexpr <- substExpr v
+    iTy <- freshUnboundTy (locatedPos (unPBinding (extractPBinding v)))
+    return $ RecordCreation iTy sexpr sfields
 
 substStmt :: PStmt -> Subst SStmt
 substStmt (Let () (PBinding i) mty body) = do
@@ -131,7 +155,18 @@ substStmt (Type i pty) = do
   sty <- substTy pty
   ref <- freshSkolem i
   return $ Type ref sty
+substStmt (Data i fields) = do
+  sfields <- forM fields $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  vRef <- liftIO $ newIORef (VUnbound i)
+  modify $ \env ->
+    env
+      { envVars = Map.insert (unLocated i) (SBinding vRef) (envVars env),
+        envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
+      }
+  return $ Data ref sfields
 
 substBlock :: PBlock -> Subst SBlock
 substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e
-

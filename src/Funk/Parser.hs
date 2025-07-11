@@ -25,6 +25,8 @@ instance Binding PBinding where
   type BTyApp PBinding = SourcePos
   type BLet PBinding = ()
   type BBlock PBinding = SourcePos
+  type BRecord PBinding = ()
+  type BRecordCreation PBinding = SourcePos
 
 type PExpr = Expr PBinding
 
@@ -88,11 +90,31 @@ lambdaExpr = do
   tok TokDot
   Lam pos v ty <$> expr
 
+recordCreationExprDebug :: Parser PExpr
+recordCreationExprDebug = do
+  pos <- getPosition
+  constructorName <- fmap Ident <$> identTok <?> "constructor name"
+  tok TokLBrace <?> "opening brace"
+  fields <-
+    sepBy
+      ( do
+          field <- fmap Ident <$> identTok <?> "field name"
+          tok TokColon <?> "colon after field name"
+          e <- expr <?> "field value"
+          return (unLocated field, e)
+      )
+      (tok TokComma <?> "comma between fields")
+  tok TokRBrace <?> "closing brace"
+  let constructorExpr = Var () (PBinding constructorName)
+  return $ RecordCreation pos constructorExpr fields
+
 atomicExpr :: Parser PExpr
 atomicExpr =
   choice
-    [ varExpr,
-      parensExpr
+    [ try recordCreationExpr,
+      varExpr,
+      parensExpr,
+      try blockExpr
     ]
 
 appExpr :: Parser PExpr
@@ -133,7 +155,74 @@ typeStmt = do
   return $ Type v ty
 
 stmt :: Parser PStmt
-stmt = choice [try letStmt, typeStmt]
+stmt = choice [try letStmt, try typeStmt, try dataStmt]
+
+dataStmt :: Parser PStmt
+dataStmt = do
+  tok TokData
+  v <- fmap Ident <$> identTok
+  tok TokLBrace
+  fields <-
+    sepBy
+      ( do
+          field <- fmap Ident <$> identTok
+          tok TokColon
+          ty <- typeExpr
+          return (unLocated field, ty)
+      )
+      (tok TokComma)
+  tok TokRBrace
+  return $ Data v fields
+
+recordLiteral :: Parser [(Ident, PExpr)]
+recordLiteral = do
+  tok TokLBrace
+  fields <-
+    sepBy
+      ( do
+          field <- fmap Ident <$> identTok
+          tok TokColon
+          e <- expr
+          return (unLocated field, e)
+      )
+      (tok TokComma)
+  tok TokRBrace
+  return fields
+
+recordCreationExpr :: Parser PExpr
+recordCreationExpr = do
+  pos <- getPosition
+  constructorName <- fmap Ident <$> identTok
+  tok TokLBrace
+  fields <-
+    sepBy
+      ( do
+          field <- fmap Ident <$> identTok
+          tok TokColon
+          e <- expr
+          return (unLocated field, e)
+      )
+      (tok TokComma)
+  tok TokRBrace
+  let constructorExpr = Var () (PBinding constructorName)
+  return $ RecordCreation pos constructorExpr fields
+
+recordCreationExpr' :: Parser PExpr
+recordCreationExpr' = do
+  pos <- getPosition
+  constructorName <- fmap Ident <$> identTok
+  tok TokLBrace
+  fields <- fieldList
+  tok TokRBrace
+  let constructorExpr = Var () (PBinding constructorName)
+  return $ RecordCreation pos constructorExpr fields
+  where
+    fieldList = sepBy fieldAssignment (tok TokComma)
+    fieldAssignment = do
+      field <- fmap Ident <$> identTok
+      tok TokColon
+      e <- expr
+      return (unLocated field, e)
 
 blockExpr :: Parser PExpr
 blockExpr = do
@@ -148,8 +237,7 @@ expr :: Parser PExpr
 expr =
   choice
     [ try lambdaExpr,
-      appExpr,
-      blockExpr
+      appExpr
     ]
 
 parseTopLevel :: [Located Token] -> Either ParseError PBlock

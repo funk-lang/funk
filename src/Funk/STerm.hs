@@ -3,6 +3,7 @@
 
 module Funk.STerm where
 
+import Control.Monad
 import Data.IORef
 import Funk.Term
 import Funk.Token
@@ -74,8 +75,7 @@ typePos (TLam ref _) = do
 data Var = VBound SExpr | VUnbound (Located Ident)
 
 data SLam = SLam
-  {
-    sLamInput :: STBinding,
+  { sLamInput :: STBinding,
     sLamOutput :: STBinding
   }
 
@@ -90,9 +90,13 @@ instance Binding SBinding where
   type BTyApp SBinding = STBinding
   type BLet SBinding = STBinding
   type BBlock SBinding = STBinding
+  type BRecord SBinding = STBinding
+  type BRecordCreation SBinding = STBinding
 
 type SExpr = Expr SBinding
+
 type SStmt = Stmt SBinding
+
 type SBlock = Block SBinding
 
 blockExpr :: SBlock -> SExpr
@@ -106,6 +110,8 @@ typeOf = \case
   TyApp ty _ _ -> ty
   TyLam ty _ _ -> ty
   BlockExpr ty _ -> ty
+  RecordType ty _ _ -> ty
+  RecordCreation ty _ _ -> ty
 
 data Precedence = AtomPrec | AppPrec | LamPrec | TyAppPrec | TyLamPrec | BlockPrec | ArrowPrec | ForallPrec
   deriving (Eq, Ord)
@@ -151,10 +157,27 @@ prettySExpr p (TyLam _ ref body) = do
         Unbound _ idx ->
           return $ text "/\\" <+> text ("_" ++ show idx) <+> text "." <+> bodyDoc
   parensIf (p > TyLamPrec) <$> doc
-
 prettySExpr p (BlockExpr _ block) = do
   blockDoc <- prettySBlock block
   return $ parensIf (p > BlockPrec) blockDoc
+prettySExpr p (RecordType _ ref fields) = do
+  v <- readIORef (unSBinding ref)
+  fieldsDoc <- forM fields $ \(f, ty) -> do
+    tyDoc <- prettySType AtomPrec ty
+    return $ text (unIdent f) <+> text ":" <+> tyDoc
+  let doc = case v of
+        VBound t -> do
+          tDoc <- prettySExpr AtomPrec t
+          return $ tDoc <+> braces (hcat (punctuate (text ",") fieldsDoc))
+        VUnbound i ->
+          return $ text (unIdent (unLocated i)) <+> braces (hcat (punctuate (text ",") fieldsDoc))
+  parensIf (p > AtomPrec) <$> doc
+prettySExpr p (RecordCreation _ expr fields) = do
+  exprDoc <- prettySExpr AtomPrec expr
+  fieldsDoc <- forM fields $ \(f, e) -> do
+    eDoc <- prettySExpr AtomPrec e
+    return $ text (unIdent f) <+> text ":" <+> eDoc
+  return $ parensIf (p > AtomPrec) (exprDoc <+> braces (hcat (punctuate (text ",") fieldsDoc)))
 
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
@@ -178,6 +201,17 @@ prettySStmt (Type sbinding ty) = do
   vStr <- showTBinding sbindingVal
   tyDoc <- prettySType AtomPrec ty
   return $ text "type" <+> text vStr <+> text "=" <+> tyDoc Text.PrettyPrint.<> semi
+prettySStmt (Data sbinding fields) = do
+  sbindingVal <- readIORef sbinding
+  vStr <- showTBinding sbindingVal
+  fieldsDoc <-
+    mapM
+      ( \(i, ty) -> do
+          tyDoc <- prettySType AtomPrec ty
+          return $ text (unIdent i) <+> text ":" <+> tyDoc
+      )
+      fields
+  return $ text "data" <+> text vStr <+> braces (hcat (punctuate (text ",") fieldsDoc)) Text.PrettyPrint.<> semi
 
 showSBlock :: SBlock -> IO String
 showSBlock = fmap render . prettySBlock

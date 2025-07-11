@@ -33,6 +33,8 @@ data Token
   | TokEq
   | TokSemicolon
   | TokType
+  | TokData
+  | TokComma
   deriving (Eq)
 
 instance Show Token where
@@ -53,6 +55,8 @@ instance Show Token where
     TokEq -> "'='"
     TokSemicolon -> ";"
     TokType -> "'type'"
+    TokData -> "'data'"
+    TokComma -> ","
 
 token :: Parser (Located Token)
 token = do
@@ -73,6 +77,7 @@ token = do
         TokRBrace <$ char '}',
         TokEq <$ char '=',
         TokSemicolon <$ char ';',
+        TokComma <$ char ',',
         identToken
       ]
   return $ Located pos t
@@ -82,6 +87,7 @@ token = do
       cs <- many (alphaNum <|> char '_')
       return $ case c : cs of
         "type" -> TokType
+        "data" -> TokData
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

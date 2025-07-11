@@ -35,9 +35,18 @@ constraintsExpr = \case
   TyLam ty _ body -> do
     cs <- constraintsExpr body
     return $ CEq (TVar ty) (TForall (typeOf body) (TVar $ typeOf body)) : cs
-  BlockExpr ty block@(Block _ expr) -> do
+  BlockExpr ty block -> do
     cs <- constraintsBlock block
-    return $ CEq (TVar ty) (TVar $ typeOf expr) : cs
+    return $ CEq (TVar ty) (TVar $ typeOf (blockExpr block)) : cs
+  RecordType ty _ fields -> do
+    csFields <- concat <$> mapM (const $ return []) fields
+    freshTy <- freshUnboundTy (error "Record type has no position")
+    return $ CEq (TVar ty) (TVar freshTy) : csFields
+  RecordCreation ty expr fields -> do
+    csExpr <- constraintsExpr expr
+    csFields <- concat <$> mapM (constraintsExpr . snd) fields
+    freshTy <- freshUnboundTy (error "Record creation has no position")
+    return $ CEq (TVar ty) (TVar freshTy) : csExpr ++ csFields
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do
@@ -47,6 +56,7 @@ constraintsStmt (Let ty _ mty body) = do
         Nothing -> csBody
   return $ CEq (TVar ty) (TVar $ typeOf body) : cs'
 constraintsStmt (Type _ _) = return []
+constraintsStmt (Data _ _) = return []
 
 constraintsBlock :: SBlock -> Fresh [Constraint]
 constraintsBlock (Block stmts expr) = do
