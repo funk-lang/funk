@@ -1,9 +1,9 @@
-type Bool = \/ a . a -> a -> a;
+type Bool = forall a . a -> a -> a;
 
-true : Bool = \ x . \ y . x;
-false : Bool = \ x . \ y . y;
+true : Bool = \x . \y . x;
+false : Bool = \x . \y . y;
 
-data User {
+data User = forall a . {
   is_cool: Bool
 }
 

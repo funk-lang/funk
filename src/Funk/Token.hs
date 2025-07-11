@@ -19,7 +19,6 @@ instance (Show a) => Show (Located a) where
 data Token
   = TokIdent String
   | TokLambda
-  | TokTypeLambda
   | TokForall
   | TokArrow
   | TokDot
@@ -41,8 +40,7 @@ instance Show Token where
   show = \case
     TokIdent _ -> "identifier"
     TokLambda -> "'\\'"
-    TokTypeLambda -> "'/\\'"
-    TokForall -> "'\\/'"
+    TokForall -> "'forall'"
     TokArrow -> "'->'"
     TokDot -> "."
     TokColon -> ":"
@@ -51,7 +49,7 @@ instance Show Token where
     TokLBracket -> "'['"
     TokRBracket -> "]"
     TokLBrace -> "'{'"
-    TokRBrace -> "'}'"
+    TokRBrace -> "}'"
     TokEq -> "'='"
     TokSemicolon -> ";"
     TokType -> "'type'"
@@ -63,9 +61,7 @@ token = do
   pos <- getPosition
   t <-
     choice
-      [ TokTypeLambda <$ try (string "/\\"),
-        TokForall <$ try (string "\\/"),
-        TokLambda <$ char '\\',
+      [ TokLambda <$ char '\\',
         TokArrow <$ try (string "->"),
         TokDot <$ char '.',
         TokColon <$ char ':',
@@ -88,6 +84,7 @@ token = do
       return $ case c : cs of
         "type" -> TokType
         "data" -> TokData
+        "forall" -> TokForall
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

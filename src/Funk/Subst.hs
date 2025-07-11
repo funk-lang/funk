@@ -76,10 +76,6 @@ substTy pty = case pty of
     ref <- freshSkolem i
     st <- substTy t
     return $ TForall ref st
-  TLam i body -> do
-    i' <- freshSkolem i
-    body' <- substTy body
-    return $ TLam i' body'
 
 extractPBinding :: PExpr -> PBinding
 extractPBinding (Var _ pbinding) = pbinding
@@ -112,10 +108,6 @@ substExpr pexpr = case pexpr of
     return $ Lam (SLam iTy oTy) (SBinding i') tyAnn body'
   App pos t1 t2 -> App <$> freshUnboundTy pos <*> substExpr t1 <*> substExpr t2
   TyApp pos t ty -> TyApp <$> freshUnboundTy pos <*> substExpr t <*> substTy ty
-  TyLam pos _ body -> do
-    ty <- freshUnboundTy pos
-    body' <- substExpr body
-    return $ TyLam ty ty body'
   BlockExpr pos block -> BlockExpr <$> freshUnboundTy pos <*> substBlock block
   RecordType () (PBinding i) fields -> do
     sfields <- forM fields $ \(f, ty) -> do
@@ -167,6 +159,19 @@ substStmt (Data i fields) = do
         envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
       }
   return $ Data ref sfields
+substStmt (DataForall i vars fields) = do
+  vars' <- mapM freshSkolem vars
+  sfields <- forM fields $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  vRef <- liftIO $ newIORef (VUnbound i)
+  modify $ \env ->
+    env
+      { envVars = Map.insert (unLocated i) (SBinding vRef) (envVars env),
+        envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
+      }
+  return $ DataForall ref vars' sfields
 
 substBlock :: PBlock -> Subst SBlock
 substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e

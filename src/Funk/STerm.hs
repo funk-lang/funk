@@ -41,12 +41,6 @@ typePos (TForall ref _) = do
     Bound t -> typePos t
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
-typePos (TLam ref _) = do
-  b <- readIORef ref
-  case b of
-    Bound t -> typePos t
-    Skolem i _ -> return $ locatedPos i
-    Unbound pos _ -> return pos
 
 data Var = VBound SExpr | VUnbound (Located Ident)
 
@@ -76,7 +70,6 @@ instance Binding SBinding where
   type BVar SBinding = STBinding
   type BLam SBinding = SLam
   type BApp SBinding = STBinding
-  type BTyLam SBinding = STBinding
   type BTyApp SBinding = STBinding
   type BLet SBinding = STBinding
   type BBlock SBinding = STBinding
@@ -98,7 +91,6 @@ typeOf = \case
   App ty _ _ -> ty
   Lam (SLam _ ty) _ _ _ -> ty
   TyApp ty _ _ -> ty
-  TyLam ty _ _ -> ty
   BlockExpr ty _ -> ty
   RecordType ty _ _ -> ty
   RecordCreation ty _ _ -> ty
@@ -121,10 +113,6 @@ sExprToDisplay = \case
     body' <- sExprToDisplay body
     outTy' <- sTypeToDisplay outTy
     return $ TyApp () body' outTy'
-  TyLam _ v body -> do
-    v' <- sTBindingToIdent v
-    body' <- sExprToDisplay body
-    return $ TyLam () v' body'
   BlockExpr _ block -> do
     block' <- sBlockToDisplay block
     return $ BlockExpr () block'
@@ -163,16 +151,6 @@ sTypeToDisplay = \case
       Unbound _ _ -> do
         ty' <- sTypeToDisplay ty
         return $ TForall (Ident "_") ty'
-  TLam ref ty -> do
-    b <- readIORef ref
-    case b of
-      Bound t -> sTypeToDisplay t
-      Skolem i _ -> do
-        ty' <- sTypeToDisplay ty
-        return $ TLam (unLocated i) ty'
-      Unbound _ _ -> do
-        ty' <- sTypeToDisplay ty
-        return $ TLam (Ident "_") ty'
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
@@ -191,6 +169,13 @@ sStmtToDisplay = \case
       ty' <- sTypeToDisplay ty
       return (f, ty')
     return $ Data binding' fields'
+  DataForall binding vars fields -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent vars
+    fields' <- forM fields $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ DataForall binding' vars' fields'
 
 sBlockToDisplay :: SBlock -> IO (Block Ident)
 sBlockToDisplay (Block stmts expr) = do

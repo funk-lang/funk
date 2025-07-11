@@ -47,7 +47,6 @@ prune ty@(TVar ref) = do
     _ -> return ty
 prune (TArrow t1 t2) = TArrow <$> prune t1 <*> prune t2
 prune (TForall v t) = TForall v <$> prune t
-prune (TLam v t) = TLam v <$> prune t
 
 freshUnboundTyS :: SourcePos -> Solver STBinding
 freshUnboundTyS = Solver . lift . freshUnboundTy
@@ -59,19 +58,6 @@ unify t1 t2 = do
   pos <- liftIO $ typePos ta
   case (ta, tb) of
     (TVar v1, TVar v2) | v1 == v2 -> return ()
-    (TForall v1 t1', TForall v2 t2') -> do
-      fresh <- freshUnboundTyS pos
-      let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
-      let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
-      unify t1Subst t2Subst
-    (TForall v t, other) -> do
-      fresh <- freshUnboundTyS pos
-      let tSubst = substituteTypeVar v (TVar fresh) t
-      unify tSubst other
-    (other, TForall v t) -> do
-      fresh <- freshUnboundTyS pos
-      let tSubst = substituteTypeVar v (TVar fresh) t
-      unify other tSubst
     (TVar v1, TVar v2) -> do
       v1' <- liftIO $ readIORef v1
       v2' <- liftIO $ readIORef v2
@@ -98,11 +84,19 @@ unify t1 t2 = do
         Unbound {} -> bindVar v l
         _ -> throwError [UnificationError l (TVar v)]
     (TArrow a1 a2, TArrow b1 b2) -> unify a1 b1 >> unify a2 b2
-    (TLam v1 t1', TLam v2 t2') -> do
+    (TForall v1 t1', TForall v2 t2') -> do
       fresh <- freshUnboundTyS pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
       let t2Subst = substituteTypeVar v2 (TVar fresh) t2'
       unify t1Subst t2Subst
+    (TForall v t, other) -> do
+      fresh <- freshUnboundTyS pos
+      let tSubst = substituteTypeVar v (TVar fresh) t
+      unify tSubst other
+    (other, TForall v t) -> do
+      fresh <- freshUnboundTyS pos
+      let tSubst = substituteTypeVar v (TVar fresh) t
+      unify other tSubst
     _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -112,8 +106,6 @@ substituteTypeVar old new ty = case ty of
   TArrow t1 t2 -> TArrow (substituteTypeVar old new t1) (substituteTypeVar old new t2)
   TForall v t | v == old -> TForall v t
   TForall v t -> TForall v (substituteTypeVar old new t)
-  TLam v t | v == old -> TLam v t
-  TLam v t -> TLam v (substituteTypeVar old new t)
 
 bindVar :: STBinding -> SType -> Solver ()
 bindVar v ty = do
@@ -133,7 +125,6 @@ occursCheck v t = do
     TVar v' -> return (v == v')
     TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
     TForall v' th -> if v == v' then return False else occursCheck v th
-    TLam v' th -> if v == v' then return False else occursCheck v th
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go

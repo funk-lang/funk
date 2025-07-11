@@ -32,9 +32,6 @@ constraintsExpr = \case
     csFun <- constraintsExpr body
     iTy <- freshUnboundTy pos
     return $ CEq (TVar (typeOf body)) (TForall iTy outTy) : csFun
-  TyLam ty _ body -> do
-    cs <- constraintsExpr body
-    return $ CEq (TVar ty) (TForall (typeOf body) (TVar $ typeOf body)) : cs
   BlockExpr ty block -> do
     cs <- constraintsBlock block
     return $ CEq (TVar ty) (TVar $ typeOf (blockExpr block)) : cs
@@ -57,6 +54,7 @@ constraintsStmt (Let ty _ mty body) = do
   return $ CEq (TVar ty) (TVar $ typeOf body) : cs'
 constraintsStmt (Type _ _) = return []
 constraintsStmt (Data _ _) = return []
+constraintsStmt (DataForall _ _ _) = return []
 
 constraintsBlock :: SBlock -> Fresh [Constraint]
 constraintsBlock (Block stmts expr) = do
