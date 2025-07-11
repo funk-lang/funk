@@ -1,11 +1,19 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Funk.Term where
 
 import Text.Parsec
+import Text.PrettyPrint hiding ((<>))
 
 newtype Ident = Ident {unIdent :: String}
-  deriving (Show, Eq, Ord)
+  deriving (Eq, Ord)
+
+instance Show Ident where
+  show = unIdent
+
+data Precedence = AtomPrec | AppPrec | LamPrec | TyAppPrec | TyLamPrec | BlockPrec | ArrowPrec | ForallPrec
+  deriving (Eq, Ord)
 
 data Type b
   = TVar b
@@ -13,6 +21,25 @@ data Type b
   | TForall b (Type b)
   | TLam b (Type b)
   deriving (Show, Eq)
+
+prettyType :: (Show b) => Precedence -> Type b -> Doc
+prettyType _ (TVar b) = text $ show b
+prettyType p (TArrow t1 t2) =
+  let s1 = prettyType ArrowPrec t1
+      s2 = prettyType AtomPrec t2
+   in parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
+prettyType p (TForall ref t) =
+  let bStr = text $ show ref
+      st = prettyType ForallPrec t
+   in parensIf (p > ForallPrec) (text "\\/" <+> bStr <+> text "." <+> st)
+prettyType p (TLam ref t) =
+  let bStr = text $ show ref
+      st = prettyType LamPrec t
+   in parensIf (p > LamPrec) (text "/\\" <+> bStr <+> text "." <+> st)
+
+parensIf :: Bool -> Doc -> Doc
+parensIf True = parens
+parensIf False = id
 
 class Binding b where
   type BTVar b
@@ -27,6 +54,18 @@ class Binding b where
   type BRecordCreation b
   type BRecord b = SourcePos
 
+instance Binding Ident where
+  type BTVar Ident = Ident
+  type BVar Ident = ()
+  type BLam Ident = ()
+  type BApp Ident = ()
+  type BTyLam Ident = ()
+  type BTyApp Ident = ()
+  type BLet Ident = ()
+  type BBlock Ident = ()
+  type BRecord Ident = ()
+  type BRecordCreation Ident = ()
+
 data Expr b
   = Var (BVar b) b
   | Lam (BLam b) b (Maybe (Type (BTVar b))) (Expr b)
@@ -37,6 +76,71 @@ data Expr b
   | RecordType (BRecord b) b [(Ident, Type (BTVar b))]
   | RecordCreation (BRecordCreation b) (Expr b) [(Ident, Expr b)]
 
-data Stmt b = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b) | Type (BTVar b) (Type (BTVar b)) | Data (BTVar b) [(Ident, Type (BTVar b))]
+data Stmt b
+  = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
+  | Type (BTVar b) (Type (BTVar b))
+  | Data (BTVar b) [(Ident, Type (BTVar b))]
+
+prettyStmt :: (Show b, Show (BTVar b)) => Stmt b -> Doc
+prettyStmt (Let _ b _ body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExpr AtomPrec body
+   in (text "let" <+> bStr <+> text "=" <+> bodyDoc) <> semi
+prettyStmt (Type b t) =
+  text "type" <+> text (show b) <+> text "=" <+> prettyType AtomPrec t
+prettyStmt (Data b fields) =
+  let bStr = text $ show b
+      fieldsDoc = map (\(f, ty) -> text (unIdent f) <+> text ":" <+> prettyType AtomPrec ty) fields
+   in text "data" <+> bStr <+> text "=" <+> braces (hsep (punctuate comma fieldsDoc))
+
+prettyExpr :: (Show (BTVar b), Show b) => Precedence -> Expr b -> Doc
+prettyExpr _ (Var _ b) = text $ show b
+prettyExpr p (Lam _ b mty body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExpr LamPrec body
+      tyDoc = case mty of
+        Just t -> text ":" <+> prettyType AtomPrec t
+        Nothing -> empty
+   in parensIf (p > LamPrec) ((text "\\" <+> (bStr <> tyDoc)) <+> text "." <+> bodyDoc)
+prettyExpr p (App _ t1 t2) =
+  let s1 = prettyExpr AppPrec t1
+      s2 = prettyExpr AtomPrec t2
+   in parensIf (p > AppPrec) (s1 <+> s2)
+prettyExpr p (TyApp _ t ty) =
+  let s = prettyExpr TyAppPrec t
+      tyDoc = prettyType AtomPrec ty
+   in parensIf (p > TyAppPrec) (s <+> brackets tyDoc)
+prettyExpr p (TyLam _ b body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExpr TyLamPrec body
+   in parensIf (p > TyLamPrec) (text "/\\" <+> bStr <+> text "." <+> bodyDoc)
+prettyExpr p (BlockExpr _ block) =
+  let blockDoc = prettyBlock block
+   in parensIf (p > BlockPrec) blockDoc
+prettyExpr p (RecordType _ _ fields) =
+  let fieldsDoc = map (\(f, ty) -> text (unIdent f) <+> text ":" <+> prettyType AtomPrec ty) fields
+   in parensIf (p > AtomPrec) (braces (hsep (punctuate comma fieldsDoc)))
+prettyExpr p (RecordCreation _ expr fields) =
+  let exprDoc = prettyExpr AtomPrec expr
+      fieldsDoc = map (\(f, e) -> text (unIdent f) <+> text "=" <+> prettyExpr AtomPrec e) fields
+   in parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate comma fieldsDoc)))
 
 data Block b = Block [Stmt b] (Expr b)
+
+prettyBlock :: (Show (BTVar b), Show b) => Block b -> Doc
+prettyBlock (Block stmts expr) =
+  let stmtsDoc = vcat $ map prettyStmt stmts
+      exprDoc = prettyExpr AtomPrec expr
+   in braces (stmtsDoc $$ exprDoc)
+
+showBlock :: (Show (BTVar b), Show b) => Block b -> String
+showBlock block = render $ prettyBlock block
+
+prettyFile :: (Show (BTVar b), Show b) => Block b -> Doc
+prettyFile (Block stmts expr) =
+  let stmtsDoc = vcat $ map prettyStmt stmts
+      exprDoc = prettyExpr AtomPrec expr
+   in stmtsDoc $$ exprDoc
+
+showFile :: (Show (BTVar b), Show b) => Block b -> String
+showFile block = render $ prettyFile block

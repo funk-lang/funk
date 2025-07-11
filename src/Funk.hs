@@ -33,7 +33,8 @@ run = do
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
-      showSBlock block >>= putStrLn
+      block' <- sBlockToDisplay block
+      putStrLn $ showFile block'
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
@@ -102,8 +103,10 @@ showSErrorPretty err input =
           showErrorLine (locatedPos ident) input $
             "Infinite type: `" ++ unIdent (unLocated ident) ++ "`"
     UnificationError t1 t2 -> do
-      t1Str <- Pretty.render <$> prettySType AtomPrec t1
-      t2Str <- Pretty.render <$> prettySType AtomPrec t2
+      t1' <- sTypeToDisplay t1
+      t2' <- sTypeToDisplay t2
+      let t1Str = Pretty.render $ prettyType AtomPrec t1'
+          t2Str = Pretty.render $ prettyType AtomPrec t2'
       return $
         "Unification error: cannot unify types `"
           ++ t1Str
