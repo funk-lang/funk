@@ -33,7 +33,13 @@ data Token
   | TokSemicolon
   | TokType
   | TokData
+  | TokTrait
+  | TokImpl
+  | TokInstance
+  | TokFor
+  | TokAt
   | TokComma
+  | TokLet
   deriving (Eq)
 
 instance Show Token where
@@ -54,7 +60,13 @@ instance Show Token where
     TokSemicolon -> ";"
     TokType -> "'type'"
     TokData -> "'data'"
+    TokTrait -> "'trait'"
+    TokImpl -> "'impl'"
+    TokInstance -> "'instance'"
+    TokFor -> "'for'"
+    TokAt -> "'@'"
     TokComma -> ","
+    TokLet -> "'let'"
 
 token :: Parser (Located Token)
 token = do
@@ -74,6 +86,7 @@ token = do
         TokEq <$ char '=',
         TokSemicolon <$ char ';',
         TokComma <$ char ',',
+        TokAt <$ char '@',
         identToken
       ]
   return $ Located pos t
@@ -85,6 +98,11 @@ token = do
         "type" -> TokType
         "data" -> TokData
         "forall" -> TokForall
+        "trait" -> TokTrait
+        "impl" -> TokImpl
+        "instance" -> TokInstance
+        "for" -> TokFor
+        "let" -> TokLet
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

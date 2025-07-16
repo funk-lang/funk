@@ -3,8 +3,8 @@
 module Funk where
 
 import Data.List
-import Funk.Fresh (Env (Env))
-import Funk.Infer (infer)
+import Funk.Fresh (Env (Env), runFresh)
+import Funk.Infer (constraintsBlock)
 import Funk.Parser (parseTopLevel)
 import Funk.STerm
 import Funk.Solver
@@ -34,7 +34,8 @@ run = do
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
       block' <- sBlockToDisplay block
-      putStrLn $ showFile block'
+      typeMap <- extractTypeMapping (blockExpr block)
+      putStrLn $ showFileWithTypes typeMap block'
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
@@ -46,13 +47,17 @@ tryRun input = do
       case res of
         Left errs -> return $ Left (SubstError errs)
         Right block -> do
-          let expr = blockExpr block
-          cs <- infer expr
-          solveConstraints cs (Env $ envNextIdx env) >>= \case
+          cs <- fst <$> runFresh (constraintsBlock block) (Env $ envNextIdx env)
+          solveConstraints cs env >>= \case
             Left errs -> return $ Left (SolverError errs)
             Right () -> return $ Right block
 
 data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
+
+instance Show Error where
+  show (ParserError _) = "Parse Error"
+  show (SubstError _) = "Substitution Error"
+  show (SolverError _) = "Solver Error"
 
 showParseErrorPretty :: ParseError -> String -> String
 showParseErrorPretty err input =
@@ -113,6 +118,13 @@ showSErrorPretty err input =
           ++ "` and `"
           ++ t2Str
           ++ "`"
+    MissingTraitImpl pos traitName targetType -> do
+      traitName' <- sTBindingToIdent traitName
+      targetType' <- sTypeToDisplay targetType
+      let targetTypeStr = Pretty.render $ prettyType AtomPrec targetType'
+          traitNameStr = unIdent traitName'
+          errorMsg = "No implementation of trait `" ++ traitNameStr ++ "` for type `" ++ targetTypeStr ++ "`"
+      return $ showErrorLine pos input errorMsg
 
 showErrorPretty :: Error -> String -> IO String
 showErrorPretty (ParserError err) input = return $ showParseErrorPretty err input

@@ -4,12 +4,14 @@
 
 module Funk.Infer where
 
-import Control.Monad.State
+import Control.Monad.IO.Class
 import Funk.Fresh
 import Funk.STerm
 import Funk.Term
 
-data Constraint = CEq SType SType
+data Constraint
+  = CEq SType SType
+  | CTrait STBinding [STBinding] SType -- trait constraint: trait_name type_vars target_type
 
 constraintsExpr :: SExpr -> Fresh [Constraint]
 constraintsExpr = \case
@@ -17,8 +19,15 @@ constraintsExpr = \case
   App ty t1 t2 -> do
     cs1 <- constraintsExpr t1
     cs2 <- constraintsExpr t2
+    -- Special case: if t1 is an application of a TraitMethod, connect the target type
+    extraConstraints <- case t1 of
+      App _ (TraitMethod _ _ _ targetType _) _ ->
+        -- Connect the trait method's target type with the argument type
+        return [CEq targetType (TVar (typeOf t2))]
+      _ -> return []
     return $
-      [CEq (TVar (typeOf t1)) (TArrow (TVar (typeOf t2)) (TVar ty))]
+      extraConstraints
+        ++ [CEq (TVar (typeOf t1)) (TArrow (TVar (typeOf t2)) (TVar ty))]
         ++ cs1
         ++ cs2
   Lam (SLam iTy oTy) _ mty body -> do
@@ -44,6 +53,12 @@ constraintsExpr = \case
     csFields <- concat <$> mapM (constraintsExpr . snd) fields
     freshTy <- freshUnboundTy (error "Record creation has no position")
     return $ CEq (TVar ty) (TVar freshTy) : csExpr ++ csFields
+  TraitMethod _ traitName typeArgs targetType _ -> do
+    -- Generate constraint that the target type implements the trait
+    -- Convert Type STBinding to STBinding for typeArgs
+    typeArgsRefs <- mapM (\_ -> freshUnboundTy (error "trait method type arg")) typeArgs
+    -- Always generate a constraint to test the system
+    return [CTrait traitName typeArgsRefs targetType]
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do
@@ -55,6 +70,9 @@ constraintsStmt (Let ty _ mty body) = do
 constraintsStmt (Type _ _) = return []
 constraintsStmt (Data _ _) = return []
 constraintsStmt (DataForall _ _ _) = return []
+constraintsStmt (Trait _ _ _) = return []
+constraintsStmt (Impl _ _ _ methods) = do
+  concat <$> mapM (constraintsExpr . snd) methods
 
 constraintsBlock :: SBlock -> Fresh [Constraint]
 constraintsBlock (Block stmts expr) = do

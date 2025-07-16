@@ -1,10 +1,19 @@
-type Bool = forall a . a -> a -> a;
-
-true : Bool = \x . \y . x;
-false : Bool = \x . \y . y;
-
-data User = forall a . {
-  is_cool: Bool
+data Reader = forall r a . {
+  runReader: r -> a
 }
 
-User { is_cool: true }
+trait Functor f {
+  fmap: forall a b . (a -> b) -> f a -> f b
+}
+
+instance Functor forall r . Reader r = {
+  fmap = \f reader -> Reader {
+    runReader = \r -> f r
+  }
+}
+
+let ask = Reader { runReader = \r -> r };
+
+let identity = \x -> x;
+
+fmap identity ask

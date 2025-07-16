@@ -16,16 +16,26 @@ import Funk.Term
 import Funk.Token
 import Text.Parsec
 
+-- Find a trait method by name in the trait definitions
+findTraitMethod :: String -> Map Ident SStmt -> Maybe (Ident, STBinding)
+findTraitMethod methodName traits =
+  case [ (traitName, traitRef) | (traitName, Trait traitRef _ methods) <- Map.toList traits, any (\(method, _) -> unIdent method == methodName) methods
+       ] of
+    (traitName, traitRef) : _ -> Just (traitName, traitRef)
+    [] -> Nothing
+
 data Env
   = Env
   { envVars :: Map Ident SBinding,
     envTys :: Map Ident STBinding,
     envVarTypes :: Map Ident STBinding,
+    envTraits :: Map Ident SStmt, -- trait definitions
+    envImpls :: [(STBinding, [STBinding], SType, SStmt)], -- impl instances
     envNextIdx :: Int
   }
 
 emptyEnv :: Env
-emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envNextIdx = 0}
+emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envTraits = Map.empty, envImpls = [], envNextIdx = 0}
 
 newtype Subst a = Subst {unSubst :: ExceptT [(Located Ident)] (StateT Env IO) a}
   deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [(Located Ident)])
@@ -76,6 +86,7 @@ substTy pty = case pty of
     ref <- freshSkolem i
     st <- substTy t
     return $ TForall ref st
+  TApp t1 t2 -> TApp <$> substTy t1 <*> substTy t2
 
 extractPBinding :: PExpr -> PBinding
 extractPBinding (Var _ pbinding) = pbinding
@@ -85,13 +96,25 @@ substExpr :: PExpr -> Subst SExpr
 substExpr pexpr = case pexpr of
   Var _ (PBinding i) -> do
     env <- get
-    termBinding <- case Map.lookup (unLocated i) (envVars env) of
-      Just ref -> return ref
-      Nothing -> throwError [i]
-    typeBinding <- case Map.lookup (unLocated i) (envVarTypes env) of
-      Just ty -> return ty
-      Nothing -> throwError [i]
-    return $ Var typeBinding termBinding
+    let methodName = unLocated i
+
+    -- Check if this is a trait method by looking for it in trait definitions
+    case findTraitMethod (unIdent methodName) (envTraits env) of
+      Just (_, traitRef) -> do
+        -- Generate a TraitMethod call
+        pos <- return $ locatedPos i
+        targetTy <- freshUnboundTy pos
+        iTy <- freshUnboundTy pos
+        return $ TraitMethod iTy traitRef [] (TVar targetTy) methodName
+      Nothing -> do
+        -- Regular variable lookup
+        termBinding <- case Map.lookup (unLocated i) (envVars env) of
+          Just ref -> return ref
+          Nothing -> throwError [i]
+        typeBinding <- case Map.lookup (unLocated i) (envVarTypes env) of
+          Just ty -> return ty
+          Nothing -> throwError [i]
+        return $ Var typeBinding termBinding
   Lam pos (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
     iTy <- freshUnboundTy pos
@@ -126,8 +149,29 @@ substExpr pexpr = case pexpr of
       sexpr <- substExpr e
       return (f, sexpr)
     sexpr <- substExpr v
-    iTy <- freshUnboundTy (locatedPos (unPBinding (extractPBinding v)))
+    -- Look up the constructor type in the environment instead of creating fresh unbound type
+    let constructorName = unLocated (unPBinding (extractPBinding v))
+    env <- get
+    iTy <- case Map.lookup constructorName (envVarTypes env) of
+      Just existingType -> return existingType
+      Nothing -> freshUnboundTy (locatedPos (unPBinding (extractPBinding v)))
     return $ RecordCreation iTy sexpr sfields
+  TraitMethod pos traitName typeArgs targetType methodName -> do
+    env <- get
+    traitRef <- case Map.lookup (unLocated traitName) (envTys env) of
+      Just ref -> return ref
+      Nothing -> throwError [traitName]
+    typeArgs' <- mapM substTy typeArgs
+    -- For placeholder types, create a fresh unbound type
+    targetType' <-
+      if show (getTVarName targetType) == "PlaceholderType"
+        then TVar <$> freshUnboundTy pos
+        else substTy targetType
+    iTy <- freshUnboundTy pos
+    return $ TraitMethod iTy traitRef typeArgs' targetType' methodName
+  where
+    getTVarName (TVar ident) = unLocated ident
+    getTVarName _ = Ident "other"
 
 substStmt :: PStmt -> Subst SStmt
 substStmt (Let () (PBinding i) mty body) = do
@@ -172,6 +216,25 @@ substStmt (DataForall i vars fields) = do
         envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
       }
   return $ DataForall ref vars' sfields
+substStmt (Trait i vars methods) = do
+  vars' <- mapM freshSkolem vars
+  smethods <- forM methods $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  let traitStmt' = Trait ref vars' smethods
+  modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
+  return traitStmt'
+substStmt (Impl i vars ty methods) = do
+  vars' <- mapM freshSkolem vars
+  sty <- substTy ty
+  smethods <- forM methods $ \(f, e) -> do
+    sexpr <- substExpr e
+    return (f, sexpr)
+  ref <- freshSkolem i
+  let implStmt' = Impl ref vars' sty smethods
+  modify $ \env -> env {envImpls = (ref, vars', sty, implStmt') : envImpls env}
+  return implStmt'
 
 substBlock :: PBlock -> Subst SBlock
 substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e

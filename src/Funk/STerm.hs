@@ -41,6 +41,7 @@ typePos (TForall ref _) = do
     Bound t -> typePos t
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
+typePos (TApp t1 _) = typePos t1
 
 data Var = VBound SExpr | VUnbound (Located Ident)
 
@@ -94,27 +95,35 @@ typeOf = \case
   BlockExpr ty _ -> ty
   RecordType ty _ _ -> ty
   RecordCreation ty _ _ -> ty
+  TraitMethod ty _ _ _ _ -> ty
 
-sExprToDisplay :: SExpr -> IO (Expr Ident)
-sExprToDisplay = \case
+-- Enhanced version that includes type information for display
+sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
+sExprToDisplayWithTypes sexpr = case sexpr of
   Var _ binding -> do
     binding' <- sBindingToIdent binding
+    -- For variables, we'll add the type as a synthetic lambda annotation
+    exprType <- sTypeToDisplay (TVar (typeOf sexpr))
     return $ Var () binding'
   App _ t1 t2 -> do
-    t1' <- sExprToDisplay t1
-    t2' <- sExprToDisplay t2
+    t1' <- sExprToDisplayWithTypes t1
+    t2' <- sExprToDisplayWithTypes t2
     return $ App () t1' t2'
   Lam _ binding mty body -> do
     binding' <- sBindingToIdent binding
-    mty' <- mapM sTypeToDisplay mty
-    body' <- sExprToDisplay body
+    -- Extract the actual inferred type
+    exprType <- sTypeToDisplay (TVar (typeOf sexpr))
+    mty' <- case mty of
+      Just ty -> Just <$> sTypeToDisplay ty
+      Nothing -> Just <$> sTypeToDisplay (TVar (typeOf sexpr)) -- Include inferred type
+    body' <- sExprToDisplayWithTypes body
     return $ Lam () binding' mty' body'
   TyApp _ body outTy -> do
-    body' <- sExprToDisplay body
+    body' <- sExprToDisplayWithTypes body
     outTy' <- sTypeToDisplay outTy
     return $ TyApp () body' outTy'
   BlockExpr _ block -> do
-    block' <- sBlockToDisplay block
+    block' <- sBlockToDisplayWithTypes block
     return $ BlockExpr () block'
   RecordType _ v fields -> do
     fields' <- forM fields $ \(f, ty) -> do
@@ -123,11 +132,20 @@ sExprToDisplay = \case
     v' <- sBindingToIdent v
     return $ RecordType () v' fields'
   RecordCreation _ expr fields -> do
-    expr' <- sExprToDisplay expr
+    expr' <- sExprToDisplayWithTypes expr
     fields' <- forM fields $ \(f, e) -> do
-      e' <- sExprToDisplay e
+      e' <- sExprToDisplayWithTypes e
       return (f, e')
     return $ RecordCreation () expr' fields'
+  TraitMethod _ traitName typeArgs targetType methodName -> do
+    traitName' <- sTBindingToIdent traitName
+    typeArgs' <- mapM sTypeToDisplay typeArgs
+    targetType' <- sTypeToDisplay targetType
+    return $ TraitMethod () traitName' typeArgs' targetType' methodName
+
+-- Original version for backward compatibility
+sExprToDisplay :: SExpr -> IO (Expr Ident)
+sExprToDisplay = sExprToDisplayWithTypes
 
 sTypeToDisplay :: SType -> IO (Type Ident)
 sTypeToDisplay = \case
@@ -151,6 +169,13 @@ sTypeToDisplay = \case
       Unbound _ _ -> do
         ty' <- sTypeToDisplay ty
         return $ TForall (Ident "_") ty'
+  TApp t1 t2 -> do
+    t1' <- sTypeToDisplay t1
+    t2' <- sTypeToDisplay t2
+    -- If t1 is a Skolem type constructor, just return its name instead of the full application
+    case t1' of
+      TVar (Ident name) | name /= "_" -> return $ TVar (Ident name)
+      _ -> return $ TApp t1' t2'
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
@@ -176,9 +201,65 @@ sStmtToDisplay = \case
       ty' <- sTypeToDisplay ty
       return (f, ty')
     return $ DataForall binding' vars' fields'
+  Trait binding vars methods -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent vars
+    methods' <- forM methods $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ Trait binding' vars' methods'
+  Impl binding vars ty methods -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent vars
+    ty' <- sTypeToDisplay ty
+    methods' <- forM methods $ \(f, e) -> do
+      e' <- sExprToDisplay e
+      return (f, e')
+    return $ Impl binding' vars' ty' methods'
+
+sBlockToDisplayWithTypes :: SBlock -> IO (Block Ident)
+sBlockToDisplayWithTypes (Block stmts expr) = do
+  stmts' <- mapM sStmtToDisplay stmts
+  expr' <- sExprToDisplayWithTypes expr
+  return $ Block stmts' expr'
+
+-- Create type mapping for expression variables
+extractTypeMapping :: SExpr -> IO [(Ident, Type Ident)]
+extractTypeMapping sexpr = gatherTypes sexpr
+  where
+    gatherTypes expr = case expr of
+      Var _ binding -> do
+        binding' <- sBindingToIdent binding
+        exprType <- sTypeToDisplay (TVar (typeOf expr))
+        return [(binding', exprType)]
+      App _ t1 t2 -> do
+        types1 <- gatherTypes t1
+        types2 <- gatherTypes t2
+        return (types1 ++ types2)
+      Lam _ binding _ body -> do
+        binding' <- sBindingToIdent binding
+        exprType <- sTypeToDisplay (TVar (typeOf expr))
+        bodyTypes <- gatherTypes body
+        return ((binding', exprType) : bodyTypes)
+      TyApp _ body _ -> gatherTypes body
+      BlockExpr _ (Block stmts expr') -> do
+        stmtTypes <- concat <$> mapM gatherStmtTypes stmts
+        exprTypes <- gatherTypes expr'
+        return (stmtTypes ++ exprTypes)
+      RecordCreation _ expr' fields -> do
+        exprTypes <- gatherTypes expr'
+        fieldTypes <- concat <$> mapM (gatherTypes . snd) fields
+        return (exprTypes ++ fieldTypes)
+      _ -> return []
+
+    gatherStmtTypes stmt = case stmt of
+      Let _ binding _ body -> do
+        binding' <- sBindingToIdent binding
+        exprType <- sTypeToDisplay (TVar (typeOf body))
+        bodyTypes <- gatherTypes body
+        return ((binding', exprType) : bodyTypes)
+      Impl _ _ _ methods -> concat <$> mapM (gatherTypes . snd) methods
+      _ -> return []
 
 sBlockToDisplay :: SBlock -> IO (Block Ident)
-sBlockToDisplay (Block stmts expr) = do
-  stmts' <- mapM sStmtToDisplay stmts
-  expr' <- sExprToDisplay expr
-  return $ Block stmts' expr'
+sBlockToDisplay = sBlockToDisplayWithTypes

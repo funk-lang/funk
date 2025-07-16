@@ -44,9 +44,15 @@ executable funk
 test-suite funk-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    other-modules:    
+        Funk.TokenSpec
+        Funk.ParserSpec
+        Funk.SimpleSpec
     hs-source-dirs:   test
     default-language: Haskell2010
     ghc-options:      -Wall
     build-depends:
         base >=4,
-        funk
+        funk,
+        hspec >=2.7,
+        parsec
