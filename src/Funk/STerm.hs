@@ -1,4 +1,3 @@
-{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -9,6 +8,7 @@ import Data.IORef
 import Funk.Term
 import Funk.Token
 import Text.Parsec
+import qualified Text.Parsec.Pos as Pos
 
 data TBinding
   = Bound (Type STBinding)
@@ -49,6 +49,8 @@ typePos (TForall ref _) = do
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
 typePos (TApp t1 _) = typePos t1
+typePos (TList t) = typePos t
+typePos TUnit = return (Pos.newPos "" 1 1)
 
 
 data Var = VBound SExpr | VUnbound (Located Ident)
@@ -104,6 +106,9 @@ typeOf = \case
   RecordType ty _ _ -> ty
   RecordCreation ty _ _ -> ty
   TraitMethod ty _ _ _ _ -> ty
+  PrimUnit ty -> ty
+  PrimNil ty _ -> ty
+  PrimCons ty _ _ _ -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -111,7 +116,7 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   Var _ binding -> do
     binding' <- sBindingToIdent binding
     -- For variables, we'll add the type as a synthetic lambda annotation
-    exprType <- sTypeToDisplay (TVar (typeOf sexpr))
+    _ <- sTypeToDisplay (TVar (typeOf sexpr))
     return $ Var () binding'
   App _ t1 t2 -> do
     t1' <- sExprToDisplayWithTypes t1
@@ -120,7 +125,7 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   Lam _ binding mty body -> do
     binding' <- sBindingToIdent binding
     -- Extract the actual inferred type
-    exprType <- sTypeToDisplay (TVar (typeOf sexpr))
+    _ <- sTypeToDisplay (TVar (typeOf sexpr))
     mty' <- case mty of
       Just ty -> Just <$> sTypeToDisplay ty
       Nothing -> Just <$> sTypeToDisplay (TVar (typeOf sexpr)) -- Include inferred type
@@ -150,6 +155,15 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     typeArgs' <- mapM sTypeToDisplay typeArgs
     targetType' <- sTypeToDisplay targetType
     return $ TraitMethod () traitName' typeArgs' targetType' methodName
+  PrimUnit _ -> return $ PrimUnit ()
+  PrimNil _ ty -> do
+    ty' <- sTypeToDisplay ty
+    return $ PrimNil () ty'
+  PrimCons _ ty head tail -> do
+    ty' <- sTypeToDisplay ty
+    head' <- sExprToDisplayWithTypes head
+    tail' <- sExprToDisplayWithTypes tail
+    return $ PrimCons () ty' head' tail'
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)
@@ -180,10 +194,11 @@ sTypeToDisplay = \case
   TApp t1 t2 -> do
     t1' <- sTypeToDisplay t1
     t2' <- sTypeToDisplay t2
-    -- If t1 is a Skolem type constructor, just return its name instead of the full application
-    case t1' of
-      TVar (Ident name) | name /= "_" -> return $ TVar (Ident name)
-      _ -> return $ TApp t1' t2'
+    return $ TApp t1' t2'
+  TList t -> do
+    t' <- sTypeToDisplay t
+    return $ TList t'
+  TUnit -> return TUnit
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
@@ -218,7 +233,7 @@ sStmtToDisplay = \case
     return $ Trait binding' vars' methods'
   TraitWithKinds binding vars methods -> do
     binding' <- sTBindingToIdent binding
-    vars' <- mapM sTBindingToIdent (map fst vars)
+    vars' <- mapM (sTBindingToIdent . fst) vars
     methods' <- forM methods $ \(f, ty) -> do
       ty' <- sTypeToDisplay ty
       return (f, ty')
@@ -240,7 +255,7 @@ sBlockToDisplayWithTypes (Block stmts expr) = do
 
 -- Create type mapping for expression variables
 extractTypeMapping :: SExpr -> IO [(Ident, Type Ident)]
-extractTypeMapping sexpr = gatherTypes sexpr
+extractTypeMapping = gatherTypes
   where
     gatherTypes expr = case expr of
       Var _ binding -> do
@@ -265,6 +280,12 @@ extractTypeMapping sexpr = gatherTypes sexpr
         exprTypes <- gatherTypes expr'
         fieldTypes <- concat <$> mapM (gatherTypes . snd) fields
         return (exprTypes ++ fieldTypes)
+      PrimUnit _ -> return []
+      PrimNil _ _ -> return []
+      PrimCons _ _ head tail -> do
+        headTypes <- gatherTypes head
+        tailTypes <- gatherTypes tail
+        return (headTypes ++ tailTypes)
       _ -> return []
 
     gatherStmtTypes stmt = case stmt of

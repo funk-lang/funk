@@ -1,19 +1,52 @@
-data Reader = forall r a . {
-  runReader: r -> a
+data State = forall s a . {
+  runState: s -> a
 }
 
 trait Functor (f :: * -> *) {
   fmap: forall a b . (a -> b) -> f a -> f b
 }
 
-instance Functor forall r . Reader r = {
-  fmap = \f reader -> Reader {
-    runReader = \r -> f r
+trait Monad (m :: * -> *) {
+  bind: forall a b . m a -> (a -> m b) -> m b,
+  pure: forall a . a -> m a
+}
+
+trait MonadState (s :: *) (m :: * -> *) {
+  get: m s,
+  put: s -> m s
+}
+
+instance Functor forall s . State s = {
+  fmap = \f state -> state
+}
+
+instance Monad forall s . State s = {
+  bind = \state f -> state,
+  pure = \a -> State {
+    runState = \s -> a
   }
 }
 
-let ask = Reader { runReader = \r -> r };
+instance MonadState forall s . s (State s) = {
+  get = State {
+    runState = \s -> s
+  },
+  put = \newState -> State {
+    runState = \s -> newState
+  }
+}
 
-let identity = \x -> x;
+let identity: forall a . a -> a = \x -> x;
 
-fmap identity ask
+let pureState: State (forall a . a -> a) (forall a . a -> a) = pure identity;
+
+let getState: State (forall a . a -> a) (forall a . a -> a) = get;
+let putState: (forall a . a -> a) -> State (forall a . a -> a) (forall a . a -> a) = put;
+
+let statefulComputation: State (forall a . a -> a) (forall a . a -> a) = bind getState (\s -> 
+  bind (putState s) (\_ -> 
+    pure s));
+
+let result: State (forall a . a -> a) ((forall a . a -> a) -> (forall a . a -> a)) = fmap identity pureState;
+
+result

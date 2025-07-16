@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Funk.Solver where
@@ -39,6 +38,8 @@ prune ty@(TVar ref) = do
 prune (TArrow t1 t2) = TArrow <$> prune t1 <*> prune t2
 prune (TForall v t) = TForall v <$> prune t
 prune (TApp t1 t2) = TApp <$> prune t1 <*> prune t2
+prune (TList t) = TList <$> prune t
+prune TUnit = return TUnit
 
 freshUnboundTyS :: SourcePos -> Solver STBinding
 freshUnboundTyS pos = do
@@ -80,6 +81,9 @@ unify t1 t2 = do
         Unbound {} -> bindVar v l
         _ -> throwError [UnificationError l (TVar v)]
     (TArrow a1 a2, TArrow b1 b2) -> unify a1 b1 >> unify a2 b2
+    (TApp a1 a2, TApp b1 b2) -> unify a1 b1 >> unify a2 b2
+    (TList a, TList b) -> unify a b
+    (TUnit, TUnit) -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
       fresh <- freshUnboundTyS pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
@@ -103,6 +107,8 @@ substituteTypeVar old new ty = case ty of
   TForall v t | v == old -> TForall v t
   TForall v t -> TForall v (substituteTypeVar old new t)
   TApp t1 t2 -> TApp (substituteTypeVar old new t1) (substituteTypeVar old new t2)
+  TList t -> TList (substituteTypeVar old new t)
+  TUnit -> TUnit
 
 bindVar :: STBinding -> SType -> Solver ()
 bindVar v ty = do
@@ -123,6 +129,8 @@ occursCheck v t = do
     TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
     TForall v' th -> if v == v' then return False else occursCheck v th
     TApp t1 t2 -> (||) <$> occursCheck v t1 <*> occursCheck v t2
+    TList t1 -> occursCheck v t1
+    TUnit -> return False
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go
@@ -167,7 +175,7 @@ typesUnify t1 t2 = do
     Right () -> return True
     Left _ -> return False
 
-data UnificationEnv = UnificationEnv { unifSubst :: [(STBinding, SType)] }
+newtype UnificationEnv = UnificationEnv { unifSubst :: [(STBinding, SType)] }
 
 emptyUnificationEnv :: UnificationEnv
 emptyUnificationEnv = UnificationEnv []
@@ -202,6 +210,8 @@ tryUnify envRef t1 t2 = do
       case r1 of
         Left err -> return $ Left err
         Right () -> tryUnify envRef t1b t2b
+    (TList t1, TList t2) -> tryUnify envRef t1 t2
+    (TUnit, TUnit) -> return $ Right ()
     _ -> return $ Left "type mismatch"
 
 substAndPrune :: IORef UnificationEnv -> SType -> IO SType
@@ -219,6 +229,8 @@ substAndPrune envRef ty = do
     TApp t1 t2 -> TApp <$> substAndPrune envRef t1 <*> substAndPrune envRef t2
     TArrow t1 t2 -> TArrow <$> substAndPrune envRef t1 <*> substAndPrune envRef t2
     TForall v t -> TForall v <$> substAndPrune envRef t
+    TList t -> TList <$> substAndPrune envRef t
+    TUnit -> return TUnit
 
 occursCheckIO :: STBinding -> SType -> IO Bool
 occursCheckIO var ty = case ty of
@@ -235,6 +247,8 @@ occursCheckIO var ty = case ty of
     r1 <- occursCheckIO var t1
     if r1 then return True else occursCheckIO var t2
   TForall v t -> if v == var then return False else occursCheckIO var t
+  TList t -> occursCheckIO var t
+  TUnit -> return False
 
 solveConstraints :: [Constraint] -> S.Env -> IO (Either [SError] ())
 solveConstraints cs env = do

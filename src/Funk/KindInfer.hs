@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -10,7 +9,6 @@ import Data.IORef
 import Funk.Fresh
 import Funk.STerm
 import Funk.Term
-import qualified Funk.Subst as S
 import Text.Parsec (SourcePos)
 
 data KindConstraint
@@ -38,11 +36,19 @@ kindInferType = \case
     cs1 <- kindInferType t1
     cs2 <- kindInferType t2
     pos <- liftIO $ typePos t1
-    k1 <- freshUnboundKind pos
     k2 <- freshUnboundKind pos
     resultKind <- freshUnboundKind pos
     -- t1 must have kind k2 -> resultKind, t2 must have kind k2
     return $ cs1 ++ cs2 ++ [KArrowConstraint k2 resultKind (KVar $ error "kind var for t1")]
+  TList t -> do
+    cs <- kindInferType t
+    -- List constructor has kind * -> *, so inner type must have kind *
+    pos <- liftIO $ typePos t
+    starKind <- freshStarKind pos
+    return $ cs ++ [KEq (KVar $ error "need kind var for list elem") starKind]
+  TUnit -> do
+    -- Unit type has kind *
+    return []
 
 freshStarKind :: SourcePos -> Fresh SKind
 freshStarKind _ = return KStar

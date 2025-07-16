@@ -54,6 +54,12 @@ identTok = tokenPrim show updatePos testTok <?> "identifier"
 typeVar :: Parser PType
 typeVar = TVar . fmap Ident <$> identTok
 
+listType :: Parser PType
+listType = tok TokList *> (TList <$> atomicType)
+
+unitType :: Parser PType
+unitType = tok TokUnit $> TUnit
+
 parensType :: Parser PType
 parensType = tok TokLParen *> typeExpr <* tok TokRParen
 
@@ -69,6 +75,8 @@ atomicType :: Parser PType
 atomicType =
   choice
     [ try forallType,
+      listType,
+      unitType,
       typeVar,
       parensType
     ]
@@ -110,6 +118,27 @@ kindExpr = chainr1 atomicKind (tok TokArrow $> KArrow)
 
 varExpr :: Parser PExpr
 varExpr = Var () . PBinding . fmap Ident <$> identTok
+
+primUnitExpr :: Parser PExpr
+primUnitExpr = tok TokUnit $> PrimUnit ()
+
+primNilExpr :: Parser PExpr
+primNilExpr = do
+  tok TokNil
+  tok TokLBracket
+  ty <- typeExpr
+  tok TokRBracket
+  return $ PrimNil () ty
+
+primConsExpr :: Parser PExpr
+primConsExpr = do
+  tok TokCons
+  tok TokLBracket
+  ty <- typeExpr
+  tok TokRBracket
+  head <- atomicExpr
+  tail <- atomicExpr
+  return $ PrimCons () ty head tail
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
@@ -165,6 +194,9 @@ atomicExpr :: Parser PExpr
 atomicExpr =
   choice
     [ try recordCreationExpr,
+      primUnitExpr,
+      primNilExpr,
+      primConsExpr,
       varExpr,
       parensExpr,
       try blockExpr

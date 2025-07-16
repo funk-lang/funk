@@ -20,6 +20,8 @@ data Type b
   | TArrow (Type b) (Type b)
   | TForall b (Type b)
   | TApp (Type b) (Type b)
+  | TList (Type b)
+  | TUnit
   deriving (Show, Eq)
 
 data Kind b
@@ -50,6 +52,10 @@ prettyType p (TApp t1 t2) =
   let s1 = prettyType AppPrec t1
       s2 = prettyType AtomPrec t2
    in parensIf (p > AppPrec) (s1 <+> s2)
+prettyType p (TList t) =
+  let s = prettyType AtomPrec t
+   in parensIf (p > AtomPrec) (text "#List" <+> s)
+prettyType _ TUnit = text "#Unit"
 
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
@@ -87,6 +93,9 @@ data Expr b
   | RecordType (BRecord b) b [(Ident, Type (BTVar b))]
   | RecordCreation (BRecordCreation b) (Expr b) [(Ident, Expr b)]
   | TraitMethod (BApp b) (BTVar b) [Type (BTVar b)] (Type (BTVar b)) Ident
+  | PrimUnit (BVar b)
+  | PrimNil (BVar b) (Type (BTVar b))
+  | PrimCons (BVar b) (Type (BTVar b)) (Expr b) (Expr b)
 
 data Stmt b
   = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
@@ -164,6 +173,12 @@ prettyExpr p (TraitMethod _ traitName typeArgs targetType methodName) =
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
+prettyExpr _ (PrimUnit _) = text "#Unit"
+prettyExpr _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
+prettyExpr p (PrimCons _ ty head tail) =
+  let headDoc = prettyExpr AtomPrec head
+      tailDoc = prettyExpr AtomPrec tail
+   in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
 
 -- Enhanced pretty printing that shows types for all expressions
 prettyExprWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Precedence -> Expr b -> Doc
@@ -201,6 +216,12 @@ prettyExprWithTypes typeMap p (TraitMethod _ traitName typeArgs targetType metho
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
+prettyExprWithTypes _ _ (PrimUnit _) = text "#Unit"
+prettyExprWithTypes _ _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
+prettyExprWithTypes typeMap p (PrimCons _ ty head tail) =
+  let headDoc = prettyExprWithTypes typeMap AtomPrec head
+      tailDoc = prettyExprWithTypes typeMap AtomPrec tail
+   in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
 
 data Block b = Block [Stmt b] (Expr b)
 

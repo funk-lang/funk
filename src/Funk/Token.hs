@@ -42,6 +42,10 @@ data Token
   | TokAt
   | TokComma
   | TokLet
+  | TokList
+  | TokUnit
+  | TokNil
+  | TokCons
   deriving (Eq)
 
 instance Show Token where
@@ -71,6 +75,10 @@ instance Show Token where
     TokAt -> "'@'"
     TokComma -> ","
     TokLet -> "'let'"
+    TokList -> "'#List'"
+    TokUnit -> "'#Unit'"
+    TokNil -> "'#nil'"
+    TokCons -> "'#cons'"
 
 token :: Parser (Located Token)
 token = do
@@ -98,7 +106,7 @@ token = do
   return $ Located pos t
   where
     identToken = do
-      c <- letter <|> char '_'
+      c <- letter <|> char '_' <|> char '#'
       cs <- many (alphaNum <|> char '_')
       return $ case c : cs of
         "type" -> TokType
@@ -109,6 +117,10 @@ token = do
         "instance" -> TokInstance
         "for" -> TokFor
         "let" -> TokLet
+        "#List" -> TokList
+        "#Unit" -> TokUnit
+        "#nil" -> TokNil
+        "#cons" -> TokCons
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

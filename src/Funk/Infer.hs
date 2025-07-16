@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -59,6 +58,21 @@ constraintsExpr = \case
     typeArgsRefs <- mapM (\_ -> freshUnboundTy (error "trait method type arg")) typeArgs
     -- Always generate a constraint to test the system
     return [CTrait traitName typeArgsRefs targetType]
+  PrimUnit ty -> do
+    -- #unit has type #Unit
+    return [CEq (TVar ty) TUnit]
+  PrimNil ty elemTy -> do
+    -- #nil[T] has type #List T
+    return [CEq (TVar ty) (TList elemTy)]
+  PrimCons ty elemTy headExpr tailExpr -> do
+    -- #cons[T] head tail has type #List T
+    -- head has type T, tail has type #List T
+    csHead <- constraintsExpr headExpr
+    csTail <- constraintsExpr tailExpr
+    return $ [ CEq (TVar ty) (TList elemTy),
+               CEq (TVar (typeOf headExpr)) elemTy,
+               CEq (TVar (typeOf tailExpr)) (TList elemTy)
+             ] ++ csHead ++ csTail
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do
@@ -67,11 +81,11 @@ constraintsStmt (Let ty _ mty body) = do
         Just ann -> CEq (TVar ty) ann : csBody
         Nothing -> csBody
   return $ CEq (TVar ty) (TVar $ typeOf body) : cs'
-constraintsStmt (Type _ _) = return []
-constraintsStmt (Data _ _) = return []
-constraintsStmt (DataForall _ _ _) = return []
-constraintsStmt (Trait _ _ _) = return []
-constraintsStmt (TraitWithKinds _ _ _) = return []
+constraintsStmt (Type {}) = return []
+constraintsStmt (Data {}) = return []
+constraintsStmt (DataForall {}) = return []
+constraintsStmt (Trait {}) = return []
+constraintsStmt (TraitWithKinds {}) = return []
 constraintsStmt (Impl _ _ _ methods) = do
   concat <$> mapM (constraintsExpr . snd) methods
 

@@ -1,5 +1,4 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Funk.Subst where
@@ -15,6 +14,7 @@ import Funk.STerm
 import Funk.Term
 import Funk.Token
 import Text.Parsec
+import qualified Text.Parsec.Pos as Pos
 
 -- Find a trait method by name in the trait definitions
 findTraitMethod :: String -> Map Ident SStmt -> Maybe (Ident, STBinding)
@@ -37,8 +37,8 @@ data Env
 emptyEnv :: Env
 emptyEnv = Env {envVars = Map.empty, envTys = Map.empty, envVarTypes = Map.empty, envTraits = Map.empty, envImpls = [], envNextIdx = 0}
 
-newtype Subst a = Subst {unSubst :: ExceptT [(Located Ident)] (StateT Env IO) a}
-  deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [(Located Ident)])
+newtype Subst a = Subst {unSubst :: ExceptT [Located Ident] (StateT Env IO) a}
+  deriving (Functor, Monad, MonadIO, MonadState Env, MonadError [Located Ident])
 
 instance Applicative Subst where
   pure = Subst . pure
@@ -51,7 +51,7 @@ instance Applicative Subst where
       (Left errs, _) -> throwError errs
       (_, Left errs) -> throwError errs
 
-runSubst :: Subst a -> IO (Either [(Located Ident)] a, Env)
+runSubst :: Subst a -> IO (Either [Located Ident] a, Env)
 runSubst solver = runStateT (runExceptT $ unSubst solver) emptyEnv
 
 freshSkolem :: Located Ident -> Subst STBinding
@@ -87,6 +87,8 @@ substTy pty = case pty of
     st <- substTy t
     return $ TForall ref st
   TApp t1 t2 -> TApp <$> substTy t1 <*> substTy t2
+  TList t -> TList <$> substTy t
+  TUnit -> return TUnit
 
 extractPBinding :: PExpr -> PBinding
 extractPBinding (Var _ pbinding) = pbinding
@@ -102,7 +104,7 @@ substExpr pexpr = case pexpr of
     case findTraitMethod (unIdent methodName) (envTraits env) of
       Just (_, traitRef) -> do
         -- Generate a TraitMethod call
-        pos <- return $ locatedPos i
+        let pos = locatedPos i
         targetTy <- freshUnboundTy pos
         iTy <- freshUnboundTy pos
         return $ TraitMethod iTy traitRef [] (TVar targetTy) methodName
@@ -169,6 +171,19 @@ substExpr pexpr = case pexpr of
         else substTy targetType
     iTy <- freshUnboundTy pos
     return $ TraitMethod iTy traitRef typeArgs' targetType' methodName
+  PrimUnit _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimUnit iTy
+  PrimNil _ ty -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    ty' <- substTy ty
+    return $ PrimNil iTy ty'
+  PrimCons _ ty head tail -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    ty' <- substTy ty
+    head' <- substExpr head
+    tail' <- substExpr tail
+    return $ PrimCons iTy ty' head' tail'
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"
@@ -226,7 +241,7 @@ substStmt (Trait i vars methods) = do
   modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
   return traitStmt'
 substStmt (TraitWithKinds i vars methods) = do
-  vars' <- mapM freshSkolem (map fst vars)
+  vars' <- mapM (freshSkolem . fst) vars
   smethods <- forM methods $ \(f, ty) -> do
     sty <- substTy ty
     return (f, sty)
