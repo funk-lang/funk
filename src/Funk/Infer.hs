@@ -71,6 +71,7 @@ constraintsStmt (Type _ _) = return []
 constraintsStmt (Data _ _) = return []
 constraintsStmt (DataForall _ _ _) = return []
 constraintsStmt (Trait _ _ _) = return []
+constraintsStmt (TraitWithKinds _ _ _) = return []
 constraintsStmt (Impl _ _ _ methods) = do
   concat <$> mapM (constraintsExpr . snd) methods
 

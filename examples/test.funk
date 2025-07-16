@@ -2,7 +2,7 @@ data Reader = forall r a . {
   runReader: r -> a
 }
 
-trait Functor f {
+trait Functor (f :: * -> *) {
   fmap: forall a b . (a -> b) -> f a -> f b
 }
 

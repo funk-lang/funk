@@ -11,6 +11,8 @@ type Parser = Parsec [Located Token] ()
 
 type PType = Type (Located Ident)
 
+type PKind = Kind (Located Ident)
+
 newtype PBinding = PBinding
   { unPBinding :: Located Ident
   }
@@ -85,6 +87,26 @@ typeAppExpr = do
 
 typeExpr :: Parser PType
 typeExpr = chainr1 typeAppExpr (tok TokArrow $> TArrow)
+
+kindVar :: Parser PKind
+kindVar = KVar . fmap Ident <$> identTok
+
+starKind :: Parser PKind
+starKind = tok TokStar $> KStar
+
+parensKind :: Parser PKind
+parensKind = tok TokLParen *> kindExpr <* tok TokRParen
+
+atomicKind :: Parser PKind
+atomicKind =
+  choice
+    [ kindVar,
+      starKind,
+      parensKind
+    ]
+
+kindExpr :: Parser PKind
+kindExpr = chainr1 atomicKind (tok TokArrow $> KArrow)
 
 varExpr :: Parser PExpr
 varExpr = Var () . PBinding . fmap Ident <$> identTok
@@ -221,7 +243,13 @@ traitStmt :: Parser PStmt
 traitStmt = do
   tok TokTrait
   v <- fmap Ident <$> identTok
-  vars <- many (fmap Ident <$> identTok)
+  vars <- many (do
+    tok TokLParen
+    var <- fmap Ident <$> identTok
+    tok TokDoubleColon
+    kind <- kindExpr
+    tok TokRParen
+    return (var, Just kind))
   tok TokLBrace
   methods <-
     sepBy
@@ -233,7 +261,9 @@ traitStmt = do
       )
       (tok TokComma)
   tok TokRBrace
-  return $ Trait v vars methods
+  case vars of
+    [] -> return $ Trait v [] methods
+    _ -> return $ TraitWithKinds v vars methods
 
 implStmt :: Parser PStmt
 implStmt = do

@@ -23,6 +23,8 @@ data Token
   | TokArrow
   | TokDot
   | TokColon
+  | TokDoubleColon
+  | TokStar
   | TokLParen
   | TokRParen
   | TokLBracket
@@ -50,6 +52,8 @@ instance Show Token where
     TokArrow -> "'->'"
     TokDot -> "."
     TokColon -> ":"
+    TokDoubleColon -> "'::''"
+    TokStar -> "'*'"
     TokLParen -> "'('"
     TokRParen -> "')'"
     TokLBracket -> "'['"
@@ -75,8 +79,10 @@ token = do
     choice
       [ TokLambda <$ char '\\',
         TokArrow <$ try (string "->"),
+        TokDoubleColon <$ try (string "::"),
         TokDot <$ char '.',
         TokColon <$ char ':',
+        TokStar <$ char '*',
         TokLParen <$ char '(',
         TokRParen <$ char ')',
         TokLBracket <$ char '[',

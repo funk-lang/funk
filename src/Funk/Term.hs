@@ -22,6 +22,20 @@ data Type b
   | TApp (Type b) (Type b)
   deriving (Show, Eq)
 
+data Kind b
+  = KVar b
+  | KStar
+  | KArrow (Kind b) (Kind b)
+  deriving (Show, Eq)
+
+prettyKind :: (Show b) => Precedence -> Kind b -> Doc
+prettyKind _ (KVar b) = text $ show b
+prettyKind _ KStar = text "*"
+prettyKind p (KArrow k1 k2) =
+  let s1 = prettyKind (succ ArrowPrec) k1
+      s2 = prettyKind ArrowPrec k2
+   in parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
+
 prettyType :: (Show b) => Precedence -> Type b -> Doc
 prettyType _ (TVar b) = text $ show b
 prettyType p (TArrow t1 t2) =
@@ -80,6 +94,7 @@ data Stmt b
   | Data (BTVar b) [(Ident, Type (BTVar b))]
   | DataForall (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
   | Trait (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
+  | TraitWithKinds (BTVar b) [(BTVar b, Maybe (Kind (BTVar b)))] [(Ident, Type (BTVar b))]
   | Impl (BTVar b) [BTVar b] (Type (BTVar b)) [(Ident, Expr b)]
 
 prettyStmt :: (Show b, Show (BTVar b)) => Stmt b -> Doc
@@ -101,6 +116,13 @@ prettyStmt (DataForall b vars fields) =
 prettyStmt (Trait b vars methods) =
   let bStr = text $ show b
       varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmt (TraitWithKinds b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (\(v, mk) -> case mk of
+        Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+        Nothing -> text (show v)) vars))
       methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
    in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 prettyStmt (Impl b vars ty methods) =

@@ -15,7 +15,13 @@ data TBinding
   | Skolem (Located Ident) Int
   | Unbound SourcePos Int
 
+data KBinding
+  = KBound (Kind SKBinding)
+  | KSkolem (Located Ident) Int
+  | KUnbound SourcePos Int
+
 type STBinding = IORef TBinding
+type SKBinding = IORef KBinding
 
 bindingPos :: STBinding -> IO SourcePos
 bindingPos ref = do
@@ -26,6 +32,7 @@ bindingPos ref = do
     Unbound pos _ -> return pos
 
 type SType = Type STBinding
+type SKind = Kind SKBinding
 
 typePos :: SType -> IO SourcePos
 typePos (TVar ref) = do
@@ -42,6 +49,7 @@ typePos (TForall ref _) = do
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
 typePos (TApp t1 _) = typePos t1
+
 
 data Var = VBound SExpr | VUnbound (Located Ident)
 
@@ -204,6 +212,13 @@ sStmtToDisplay = \case
   Trait binding vars methods -> do
     binding' <- sTBindingToIdent binding
     vars' <- mapM sTBindingToIdent vars
+    methods' <- forM methods $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ Trait binding' vars' methods'
+  TraitWithKinds binding vars methods -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent (map fst vars)
     methods' <- forM methods $ \(f, ty) -> do
       ty' <- sTypeToDisplay ty
       return (f, ty')

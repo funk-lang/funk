@@ -225,6 +225,15 @@ substStmt (Trait i vars methods) = do
   let traitStmt' = Trait ref vars' smethods
   modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
   return traitStmt'
+substStmt (TraitWithKinds i vars methods) = do
+  vars' <- mapM freshSkolem (map fst vars)
+  smethods <- forM methods $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  let traitStmt' = Trait ref vars' smethods
+  modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
+  return traitStmt'
 substStmt (Impl i vars ty methods) = do
   vars' <- mapM freshSkolem vars
   sty <- substTy ty
