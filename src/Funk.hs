@@ -34,9 +34,9 @@ run = do
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
-      -- Output the compiled core representation
-      coreOutput <- compileAndShow block
-      putStrLn coreOutput
+      -- Output the pretty-printed resolved AST with proper type resolution
+      resolvedBlock <- sBlockToDisplayWithTypes block
+      putStrLn $ showFileWithTypes [] resolvedBlock
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do

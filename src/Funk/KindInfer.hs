@@ -46,6 +46,9 @@ kindInferType = \case
     pos <- liftIO $ typePos t
     starKind <- freshStarKind pos
     return $ cs ++ [KEq (KVar $ error "need kind var for list elem") starKind]
+  TConstraint _ _ _ bodyType -> do
+    -- Constraint types have the same kind as their body type
+    kindInferType bodyType
   TUnit -> do
     -- Unit type has kind *
     return []

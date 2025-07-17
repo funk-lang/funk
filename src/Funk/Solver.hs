@@ -7,12 +7,12 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
+import Data.Maybe (catMaybes)
 import Funk.Infer (Constraint (..))
 import Funk.STerm
 import qualified Funk.Subst as S
 import Funk.Term
 import Funk.Token
-import System.IO.Unsafe
 import Text.Parsec
 
 data SError
@@ -101,7 +101,7 @@ unify t1 t2 = do
       fresh <- freshUnboundTyS pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
-    (TApp (TVar v) arg, other) -> do
+    (TApp (TVar v) _, other) -> do
       -- Type application with type variable on left - try to bind the type variable
       v' <- liftIO $ readIORef v
       case v' of
@@ -112,7 +112,7 @@ unify t1 t2 = do
           let functionType = TArrow (TVar freshArg) other
           bindVar v functionType
         _ -> throwError [UnificationError ta tb]
-    (other, TApp (TVar v) arg) -> do
+    (other, TApp (TVar v) _) -> do
       -- Type application with type variable on right - try to bind the type variable
       v' <- liftIO $ readIORef v
       case v' of
@@ -138,11 +138,6 @@ unify t1 t2 = do
       let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) bodyType typeVars
       solveTrait traitName freshVars skolemizedTarget
       unify other skolemizedBody
-    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
-      -- Both are constraint types - solve both constraints and unify body types
-      solveTrait traitName1 typeVars1 targetType1
-      solveTrait traitName2 typeVars2 targetType2
-      unify bodyType1 bodyType2
     _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -217,12 +212,9 @@ findMatchingImpl traitName _typeArgs targetType impls = do
         typeMatch <- typesUnify targetType implType
         return $ if typeMatch then Just impl else Nothing
       else return Nothing
-  return $ case concatMap maybeToList matches of
+  return $ case catMaybes matches of
     (impl : _) -> Just impl
     [] -> Nothing
-  where
-    maybeToList Nothing = []
-    maybeToList (Just x) = [x]
 
 -- Check if two types can unify (proper System FC unification)
 typesUnify :: SType -> SType -> Solver Bool
@@ -258,16 +250,16 @@ tryUnify envRef t1 t2 = do
         else do
           modifyIORef envRef $ \env -> env { unifSubst = (v2, t) : unifSubst env }
           return $ Right ()
-    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
+    (TConstraint _ _ targetType1 bodyType1, TConstraint _ _ targetType2 bodyType2) -> do
       -- Both are constraint types - unify both target and body types
       r1 <- tryUnify envRef targetType1 targetType2
       case r1 of
         Left err -> return $ Left err
         Right () -> tryUnify envRef bodyType1 bodyType2
-    (TConstraint traitName typeVars targetType bodyType, other) -> do
+    (TConstraint _ _ _ bodyType, other) -> do
       -- One is constraint type - unify body type with other
       tryUnify envRef bodyType other
-    (other, TConstraint traitName typeVars targetType bodyType) -> do
+    (other, TConstraint _ _ _ bodyType) -> do
       -- One is constraint type - unify body type with other
       tryUnify envRef other bodyType
     (TApp t1a t1b, TApp t2a t2b) -> do
@@ -280,7 +272,7 @@ tryUnify envRef t1 t2 = do
       case r1 of
         Left err -> return $ Left err
         Right () -> tryUnify envRef t1b t2b
-    (TList t1, TList t2) -> tryUnify envRef t1 t2
+    (TList t1a, TList t2a) -> tryUnify envRef t1a t2a
     (TUnit, TUnit) -> return $ Right ()
     _ -> return $ Left "type mismatch"
 

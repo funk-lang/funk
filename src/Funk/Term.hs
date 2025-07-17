@@ -46,9 +46,10 @@ prettyType p (TArrow t1 t2) =
       s2 = prettyType ArrowPrec t2
    in parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
 prettyType p (TForall ref t) =
-  let bStr = text $ show ref
-      st = prettyType ForallPrec t
-   in parensIf (p > ForallPrec) (text "forall" <+> bStr <+> text "." <+> st)
+  let (vars, innerType) = collectForalls (TForall ref t)
+      varsDoc = hsep (map (text . show) vars)
+      st = prettyType ForallPrec innerType
+   in parensIf (p > ForallPrec) (text "forall" <+> varsDoc <+> text "." <+> st)
 prettyType p (TConstraint traitName typeVars targetType bodyType) =
   let traitDoc = text $ show traitName
       typeVarsDoc = hsep (punctuate (text " ") (map (text . show) typeVars))
@@ -67,6 +68,20 @@ prettyType _ TUnit = text "#Unit"
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
 parensIf False = id
+
+-- Collect nested foralls into a list of variables and the inner type
+collectForalls :: (Show b) => Type b -> ([b], Type b)
+collectForalls (TForall var t) = 
+  let (vars, innerType) = collectForalls t
+  in (var : vars, innerType)
+collectForalls t = ([], t)
+
+-- Collect nested lambdas into a list of parameters and the inner body
+collectLambdas :: (Show (BTVar b), Show b) => Expr b -> ([(b, Maybe (Type (BTVar b)))], Expr b)
+collectLambdas (Lam _ param mty body) = 
+  let (params, innerBody) = collectLambdas body
+  in ((param, mty) : params, innerBody)
+collectLambdas expr = ([], expr)
 
 class Binding b where
   type BTVar b
@@ -196,20 +211,30 @@ prettyStmtWithTypes typeMap (Impl b vars ty methods) =
 prettyExpr :: (Show (BTVar b), Show b) => Precedence -> Expr b -> Doc
 prettyExpr _ (Var _ b) = text $ show b
 prettyExpr p (Lam _ b mty body) =
-  let bStr = text $ show b
-      bodyDoc = prettyExpr LamPrec body
-      tyDoc = case mty of
-        Just t -> text ":" <+> prettyType AtomPrec t
-        Nothing -> empty
-   in parensIf (p > LamPrec) (text "\\" <+> (bStr <> tyDoc) <+> text "->" <+> bodyDoc)
+  let (params, innerBody) = collectLambdas (Lam undefined b mty body)
+      paramDocs = map (\(var, ty) -> case ty of
+        Just t -> text (show var) <> (text ":" <+> prettyType AtomPrec t)
+        Nothing -> text (show var)) params
+      paramsDoc = hsep paramDocs
+      bodyDoc = prettyExpr LamPrec innerBody
+   in parensIf (p > LamPrec) (text "\\" <+> paramsDoc <+> text "->" <+> bodyDoc)
 prettyExpr p (App _ t1 t2) =
   let s1 = prettyExpr AppPrec t1
-      s2 = prettyExpr AtomPrec t2
+      s2 = case t2 of
+        -- Type applications and function applications in argument position need parentheses
+        TyApp {} -> parens (prettyExpr AtomPrec t2)
+        App {} -> parens (prettyExpr AtomPrec t2)
+        _ -> prettyExpr AtomPrec t2
    in parensIf (p > AppPrec) (s1 <+> s2)
 prettyExpr p (TyApp _ t ty) =
   let s = prettyExpr TyAppPrec t
       tyDoc = prettyType AtomPrec ty
-   in parensIf (p > TyAppPrec) (s <+> brackets tyDoc)
+      -- Only add parentheses for complex types, not atoms
+      tyWithAt = case ty of
+        TVar _ -> text "@" <> tyDoc
+        TUnit -> text "@" <> tyDoc
+        _ -> text "@" <> parens tyDoc
+   in parensIf (p > TyAppPrec) (s <+> tyWithAt)
 prettyExpr p (BlockExpr _ block) =
   let blockDoc = prettyBlock block
    in parensIf (p > BlockPrec) blockDoc
@@ -258,31 +283,41 @@ prettyExprWithTypes typeMap _ (Var _ b) =
     Just ty -> parens (text (show b) <+> text ":" <+> prettyType AtomPrec ty)
     Nothing -> text $ show b
 prettyExprWithTypes typeMap p (Lam _ b mty body) =
-  let bStr = text $ show b
-      bodyDoc = prettyExprWithTypes typeMap LamPrec body
-      tyDoc = case mty of
-        Just t -> text ":" <+> prettyType AtomPrec t
-        Nothing -> empty
-   in parensIf (p > LamPrec) (text "\\" <+> (bStr <> tyDoc) <+> text "->" <+> bodyDoc)
+  let (params, innerBody) = collectLambdas (Lam undefined b mty body)
+      paramDocs = map (\(var, ty) -> case ty of
+        Just t -> text (show var) <> (text ":" <+> prettyType AtomPrec t)
+        Nothing -> text (show var)) params
+      paramsDoc = hsep paramDocs
+      bodyDoc = prettyExprWithTypes typeMap LamPrec innerBody
+   in parensIf (p > LamPrec) (text "\\" <+> paramsDoc <+> text "->" <+> bodyDoc)
 prettyExprWithTypes typeMap p (App _ t1 t2) =
   let s1 = prettyExprWithTypes typeMap AppPrec t1
-      s2 = prettyExprWithTypes typeMap AtomPrec t2
+      s2 = case t2 of
+        -- Type applications and function applications in argument position need parentheses
+        TyApp {} -> parens (prettyExprWithTypes typeMap AtomPrec t2)
+        App {} -> parens (prettyExprWithTypes typeMap AtomPrec t2)
+        _ -> prettyExprWithTypes typeMap AtomPrec t2
    in parensIf (p > AppPrec) (s1 <+> s2)
 prettyExprWithTypes typeMap p (TyApp _ t ty) =
   let s = prettyExprWithTypes typeMap TyAppPrec t
       tyDoc = prettyType AtomPrec ty
-   in parensIf (p > TyAppPrec) (s <+> brackets tyDoc)
+      -- Only add parentheses for complex types, not atoms
+      tyWithAt = case ty of
+        TVar _ -> text "@" <> tyDoc
+        TUnit -> text "@" <> tyDoc
+        _ -> text "@" <> parens tyDoc
+   in parensIf (p > TyAppPrec) (s <+> tyWithAt)
 prettyExprWithTypes typeMap p (BlockExpr _ block) =
   let blockDoc = prettyBlockWithTypes typeMap block
    in parensIf (p > BlockPrec) blockDoc
-prettyExprWithTypes typeMap p (RecordType _ _ fields) =
+prettyExprWithTypes _ p (RecordType _ _ fields) =
   let fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
    in parensIf (p > AtomPrec) (braces (hsep (punctuate (text ",") fieldsDoc)))
 prettyExprWithTypes typeMap p (RecordCreation _ expr fields) =
   let exprDoc = prettyExprWithTypes typeMap AtomPrec expr
       fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprWithTypes typeMap AtomPrec e) fields
    in parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate (text ",") fieldsDoc)))
-prettyExprWithTypes typeMap p (TraitMethod _ traitName _ targetType methodName) =
+prettyExprWithTypes _ p (TraitMethod _ traitName _ targetType methodName) =
   let traitDoc = text (show traitName)
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType

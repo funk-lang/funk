@@ -40,5 +40,5 @@ let const: forall a b . a -> b -> a = \a _ -> a;
 
 let void: forall f . Functor f => f a -> f #Unit = fmap (const #Unit);
 
-let result: State #Unit = void (pure #Unit);
+let result: State #Unit #Unit = void (pure #Unit);
 result

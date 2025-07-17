@@ -100,8 +100,7 @@ constraintType = do
   tok TokConstraintArrow
   targetType <- typeAppExpr
   tok TokArrow
-  bodyType <- typeExpr
-  return $ TConstraint traitName typeVars targetType bodyType
+  TConstraint traitName typeVars targetType <$> typeExpr
 
 typeExpr :: Parser PType
 typeExpr = try constraintType <|> chainr1 typeAppExpr (tok TokArrow $> TArrow)
@@ -147,8 +146,7 @@ primConsExpr = do
   ty <- typeExpr
   tok TokRBracket
   headExpr <- atomicExpr
-  tailExpr <- atomicExpr
-  return $ PrimCons () ty headExpr tailExpr
+  PrimCons () ty headExpr <$> atomicExpr
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen

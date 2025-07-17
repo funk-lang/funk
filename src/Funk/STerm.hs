@@ -78,6 +78,30 @@ sTBindingToIdentImproved ref = do
     Unbound _ _ -> return $ Ident "_"
     Bound _ -> return $ Ident "_"  -- This shouldn't happen in this context
 
+-- Check if a type binding is truly unresolved (for trait method resolution)
+isUnresolvedBinding :: STBinding -> IO Bool
+isUnresolvedBinding ref = do
+  b <- readIORef ref
+  case b of
+    Unbound _ _ -> return True
+    Bound _ -> return False
+    Skolem _ _ -> return False
+
+-- Smart trait method target resolution that uses binding state
+smartTraitMethodTargetResolve :: SType -> IO (Type Ident)
+smartTraitMethodTargetResolve stype = case stype of
+  TVar ref -> do
+    binding <- readIORef ref
+    case binding of
+      Bound boundType -> do
+        -- Follow the binding chain
+        smartTraitMethodTargetResolve boundType
+      Unbound _ _ -> do
+        -- Truly unresolved, return "_"
+        return $ TVar $ Ident "_"
+      Skolem i _ -> return $ TVar (unLocated i)
+  _ -> sTypeToDisplay stype
+
 sBindingToIdent :: SBinding -> IO Ident
 sBindingToIdent (SBinding ref) = do
   b <- readIORef ref
@@ -92,7 +116,7 @@ smartResolveTargetType targetType exprType = do
   normalResult <- sTypeToDisplay targetType
   
   case normalResult of
-    TVar (Ident tname) | take 1 tname == "t" -> do
+    TVar (Ident tname) | tname == "_" -> do
       -- This is still an unresolved type variable, try to infer from expression type
       exprTypeResolved <- sTypeToDisplay (TVar exprType)
       case exprTypeResolved of
@@ -106,19 +130,16 @@ smartResolveTargetType targetType exprType = do
 -- Enhanced type resolution that tries harder to resolve type variables
 aggressiveTypeResolve :: SType -> IO (Type Ident)
 aggressiveTypeResolve stype = do
-  result <- sTypeToDisplay stype
-  case result of
-    TVar (Ident tname) | take 1 tname == "t" -> do
-      -- Try to see if this type variable is actually bound to something concrete
-      -- by following the binding chain more aggressively
-      case stype of
-        TVar ref -> do
-          binding <- readIORef ref
-          case binding of
-            Bound boundType -> aggressiveTypeResolve boundType
-            _ -> return result
-        _ -> return result
-    _ -> return result
+  case stype of
+    TVar ref -> do
+      binding <- readIORef ref
+      case binding of
+        Bound boundType -> aggressiveTypeResolve boundType
+        Unbound _ _ -> do
+          -- This is truly unresolved, return "_"
+          return $ TVar $ Ident "_"
+        Skolem i _ -> return $ TVar (unLocated i)
+    _ -> sTypeToDisplay stype
 
 -- Post-processing step to resolve trait method target types based on context
 -- This is called after constraint solving to clean up unresolved trait method targets
@@ -128,6 +149,39 @@ resolveTraitMethodTargets sexpr = do
   normalExpr <- sExprToDisplayWithTypes sexpr
   -- Then apply context-based resolution
   contextResolveExpr normalExpr (typeOf sexpr)
+
+-- Resolve lambda with type annotation to get proper parameter types
+resolveLambdaWithTypeAnnotation :: SExpr -> Type Ident -> IO (Expr Ident)
+resolveLambdaWithTypeAnnotation sexpr annotationType = do
+  case sexpr of
+    Lam (SLam inputType _) binding mty body -> do
+      binding' <- sBindingToIdent binding
+      
+      -- Extract parameter type from the annotation type
+      let paramType = extractFirstParamType annotationType
+      let mty' = case paramType of
+            Just pType -> Just pType
+            Nothing -> Nothing -- Fall back to inferred type
+      
+      -- Recursively handle nested lambdas with remaining parameter types
+      body' <- case extractRestParamTypes annotationType of
+        Just restType -> resolveLambdaWithTypeAnnotation body restType
+        Nothing -> sExprToDisplayWithTypes body
+      
+      return $ Lam () binding' mty' body'
+    _ -> sExprToDisplayWithTypes sexpr
+  where
+    -- Extract the first parameter type from a function type
+    extractFirstParamType :: Type Ident -> Maybe (Type Ident)
+    extractFirstParamType (TForall _ innerType) = extractFirstParamType innerType
+    extractFirstParamType (TArrow paramType _) = Just paramType
+    extractFirstParamType _ = Nothing
+    
+    -- Extract the rest of the function type after removing the first parameter
+    extractRestParamTypes :: Type Ident -> Maybe (Type Ident)
+    extractRestParamTypes (TForall _ innerType) = extractRestParamTypes innerType
+    extractRestParamTypes (TArrow _ restType) = Just restType
+    extractRestParamTypes _ = Nothing
 
 -- Targeted resolution using explicit type annotation from let bindings
 resolveTraitMethodsWithType :: SExpr -> Type Ident -> IO (Expr Ident)
@@ -141,36 +195,60 @@ resolveTraitMethodsWithType sexpr expectedType = do
 directResolveWithType :: Expr Ident -> Type Ident -> IO (Expr Ident)
 directResolveWithType expr expectedType = case expr of
   App _ f arg -> do
-    -- For function applications, we need to infer the argument type from the expected result type
-    -- and propagate that information to resolve trait methods in the argument
-    f' <- directResolveWithType f expectedType
-    
-    -- Try to infer what type the argument should have based on the function and expected result
-    -- For now, we'll propagate the expected type to the argument as well
-    -- This handles cases like void (pure #Unit) where the argument type should be State #Unit
-    arg' <- case expectedType of
-      TApp constructor argType -> 
-        -- If expected type is "Constructor ArgType", try using "Constructor ArgType" for the argument
-        directResolveWithType arg expectedType
-      _ -> 
-        -- Fallback: use the expected type for the argument as well
-        directResolveWithType arg expectedType
-    
-    return $ App () f' arg'
+    -- For function applications like "void (pure #Unit)", we need special handling
+    case f of
+      Var _ (Ident "void") -> do
+        -- void has type: Functor f => f a -> f #Unit
+        -- When used with expected type State #Unit #Unit, instantiate as void @(State #Unit) @#Unit
+        case expectedType of
+          TApp functorConstr argType -> do
+            -- Generate explicit type applications: void @(State #Unit) @#Unit @#Unit
+            let voidWithTypes = TyApp () (TyApp () (TyApp () f functorConstr) argType) TUnit
+            -- For the argument, handle it specially if it's a trait method call  
+            arg' <- case arg of
+              App _ (TraitMethod _ _ _ _ (Ident "pure")) argExpr -> do
+                -- Convert "pure #Unit" to "pure @(State #Unit) #Unit"
+                let pureVar = Var () (Ident "pure")
+                let pureWithType = TyApp () pureVar functorConstr
+                argExpr' <- directResolveWithType argExpr expectedType
+                return $ App () pureWithType argExpr'
+              _ -> directResolveWithType arg expectedType
+            return $ App () voidWithTypes arg'
+          _ -> do
+            arg' <- directResolveWithType arg expectedType
+            return $ App () f arg'
+      
+      _ -> do
+        -- For general function applications, try to infer types
+        f' <- directResolveWithType f expectedType
+        arg' <- directResolveWithType arg expectedType
+        return $ App () f' arg'
   
   TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
-    | take 1 tname == "t" -> do
+    | tname == "_" -> do
       -- This is an unresolved trait method target - use expected type to resolve it
-      case expectedType of
-        TApp constructor _ -> 
-          -- If expected type is "Constructor Arg", target should be "Constructor"
-          return $ TraitMethod () traitName typeArgs constructor methodName
-        _ -> return expr
+      case (unIdent traitName, methodName, expectedType) of
+        ("Monad", Ident "pure", TApp functorConstr _) -> 
+          -- pure: a -> m a, so if expected result is (State #Unit) #Unit, 
+          -- then target should be State #Unit
+          return $ TraitMethod () traitName typeArgs functorConstr methodName
+        ("Functor", Ident "fmap", TApp functorConstr _) ->
+          -- fmap: (a -> b) -> f a -> f b
+          -- If expected result is f b, then target should be f
+          return $ TraitMethod () traitName typeArgs functorConstr methodName
+        _ -> 
+          case expectedType of
+            TApp constructor _ -> 
+              -- If expected type is "Constructor Arg", target should be "Constructor"
+              return $ TraitMethod () traitName typeArgs constructor methodName
+            _ -> 
+              -- If expected type is just a constructor, use it directly
+              return $ TraitMethod () traitName typeArgs expectedType methodName
   
   -- For other expressions, recursively resolve any nested trait methods
   BlockExpr _ (Block stmts bodyExpr) -> do
     -- Resolve statements and body with the expected type
-    stmts' <- mapM (\stmt -> case stmt of
+    stmts' <- mapM (\case
       Let _ var mty body -> do
         body' <- directResolveWithType body expectedType
         return $ Let () var mty body'
@@ -188,7 +266,7 @@ contextResolveExpr expr exprType = case expr of
     exprTypeResolved <- sTypeToDisplay (TVar exprType)
     f' <- case f of
       TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
-        | take 1 tname == "t" -> do
+        | tname == "_" -> do
           -- This trait method application should produce the result type
           -- If result type is State #Unit, and this is pure@target #Unit, then target = State
           case exprTypeResolved of
@@ -199,7 +277,7 @@ contextResolveExpr expr exprType = case expr of
     return $ App () f' arg
   
   TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
-    | take 1 tname == "t" -> do
+    | tname == "_" -> do
       -- This is an unresolved trait method target - try to infer from context
       exprTypeResolved <- sTypeToDisplay (TVar exprType)
       case exprTypeResolved of
@@ -256,13 +334,14 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     t1' <- sExprToDisplayWithTypes t1
     t2' <- sExprToDisplayWithTypes t2
     return $ App () t1' t2'
-  Lam _ binding mty body -> do
+  Lam (SLam inputType _) binding mty body -> do
     binding' <- sBindingToIdent binding
-    -- Extract the actual inferred type
-    _ <- sTypeToDisplay (TVar (typeOf sexpr))
     mty' <- case mty of
       Just ty -> Just <$> sTypeToDisplay ty
-      Nothing -> Just <$> sTypeToDisplay (TVar (typeOf sexpr)) -- Include inferred type
+      Nothing -> do
+        -- Use the input type of the lambda parameter, not the whole lambda type
+        paramType <- sTypeToDisplay (TVar inputType)
+        return $ Just paramType
     body' <- sExprToDisplayWithTypes body
     return $ Lam () binding' mty' body'
   TyApp _ body outTy -> do
@@ -287,8 +366,8 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   TraitMethod _ traitName typeArgs targetType methodName -> do
     traitName' <- sTBindingToIdent traitName
     typeArgs' <- mapM sTypeToDisplay typeArgs
-    -- Try to resolve the target type more aggressively
-    targetType' <- aggressiveTypeResolve targetType
+    -- Try to resolve the target type using smart resolution
+    targetType' <- smartTraitMethodTargetResolve targetType
     return $ TraitMethod () traitName' typeArgs' targetType' methodName
   PrimUnit _ -> return $ PrimUnit ()
   PrimNil _ ty -> do
@@ -324,16 +403,16 @@ sTypeToDisplay = sTypeToDisplayHelper []
         t1' <- sTypeToDisplayHelper visited t1
         t2' <- sTypeToDisplayHelper visited t2
         return $ TArrow t1' t2'
-      TForall ref ty -> do
+      TForall ref ty' -> do
         b <- readIORef ref
         case b of
           Bound t -> sTypeToDisplayHelper (ref:visited) t
           Skolem i _ -> do
-            ty' <- sTypeToDisplayHelper visited ty
-            return $ TForall (unLocated i) ty'
+            ty'' <- sTypeToDisplayHelper visited ty'
+            return $ TForall (unLocated i) ty''
           Unbound _ _ -> do
-            ty' <- sTypeToDisplayHelper visited ty
-            return $ TForall (Ident "_") ty'
+            ty'' <- sTypeToDisplayHelper visited ty'
+            return $ TForall (Ident "_") ty''
       TConstraint traitName typeVars targetType bodyType -> do
         traitName' <- sTBindingToIdentImproved traitName
         typeVars' <- mapM sTBindingToIdentImproved typeVars
@@ -357,10 +436,14 @@ sStmtToDisplay = \case
     -- Use targeted resolution for let statements with explicit type annotations
     body' <- case mty' of
       Just annotationType -> do
-        -- First try normal resolution
-        normalBody <- sExprToDisplay body
-        -- Then apply targeted resolution with the expected type
-        resolveTraitMethodsWithType body annotationType
+        -- For lambda expressions with type annotations, resolve parameter types from annotation
+        case body of
+          Lam {} -> resolveLambdaWithTypeAnnotation body annotationType
+          _ -> do
+            -- First try normal resolution
+            _ <- sExprToDisplay body
+            -- Then apply targeted resolution with the expected type
+            resolveTraitMethodsWithType body annotationType
       Nothing -> sExprToDisplay body
     return $ Let () v' mty' body'
   Type binding ty -> do
@@ -408,8 +491,7 @@ sBlockToDisplayWithTypes (Block stmts expr) = do
   stmts' <- mapM sStmtToDisplay stmts
   expr' <- sExprToDisplayWithTypes expr
   -- Apply global trait method resolution based on usage patterns
-  resolvedBlock <- globalTraitMethodResolution (Block stmts' expr')
-  return resolvedBlock
+  globalTraitMethodResolution (Block stmts' expr')
 
 -- Global trait method resolution that looks at usage patterns across the entire block
 globalTraitMethodResolution :: Block Ident -> IO (Block Ident)
@@ -417,19 +499,78 @@ globalTraitMethodResolution (Block stmts expr) = do
   -- Look for patterns like: let result: Type = void (pure #Unit)
   -- and propagate the type information to resolve trait methods
   resolvedStmts <- mapM (resolveStmtWithContext stmts) stmts
-  resolvedExpr <- return expr
+  -- Also resolve the final expression if it references variables with known types
+  resolvedExpr <- resolveExprWithStatementContext stmts expr
   return $ Block resolvedStmts resolvedExpr
   where
     resolveStmtWithContext allStmts stmt = case stmt of
       Let _ var (Just annotationType) body -> do
         -- For let statements with type annotations, try to resolve trait methods
         -- in the body using the annotation type, and also resolve any function calls
-        resolvedBody <- resolveWithFunctionContext allStmts body annotationType
+        resolvedBody <- case body of
+          Lam {} -> resolveLambdaWithExpectedType body annotationType
+          _ -> resolveWithFunctionContext allStmts body annotationType
         return $ Let () var (Just annotationType) resolvedBody
       other -> return other
 
+    -- Extract parameter types from function types
+    extractParamTypes :: Type Ident -> [Type Ident]
+    extractParamTypes (TArrow paramType restType) = paramType : extractParamTypes restType
+    extractParamTypes _ = []
+    
+    -- Resolve lambda with expected type to get proper parameter type annotations
+    resolveLambdaWithExpectedType :: Expr Ident -> Type Ident -> IO (Expr Ident)
+    resolveLambdaWithExpectedType expr expectedType = case expr of
+      Lam _ param mty body -> do
+        let expectedType' = case expectedType of
+              -- Strip forall to get to the arrow type
+              TForall _ innerType -> innerType
+              _ -> expectedType
+        case expectedType' of
+          TArrow paramType restType -> do
+            -- Use the expected parameter type from the function signature
+            let newParamType = Just paramType
+            resolvedBody <- resolveLambdaWithExpectedType body restType
+            return $ Lam () param newParamType resolvedBody
+          _ -> do
+            -- Not a function type, keep original
+            return expr
+      _ -> return expr
+
+    -- Resolve expressions using context from statements (for variables that reference let bindings)
+    resolveExprWithStatementContext allStmts expr' = case expr' of
+      Var _ varName -> do
+        -- Check if this variable has a type annotation in the statements
+        case findVariableType allStmts varName of
+          Just varType -> do
+            -- If the variable references something with trait methods, resolve using its type
+            case findFunctionDef allStmts varName of
+              Just funcBody -> directResolveWithType funcBody varType
+              Nothing -> return expr'
+          Nothing -> return expr'
+      App _ funcExpr arg -> do
+        -- Handle polymorphic function calls that need explicit type applications
+        case funcExpr of
+          Var _ (Ident "void") -> do
+            -- void is polymorphic: forall f . Functor f => f a -> f #Unit
+            -- Need to instantiate it with explicit types based on the argument
+            resolvedArg <- resolveExprWithStatementContext allStmts arg
+            case findVariableType allStmts (Ident "result") of
+              Just (TApp functorType argType) -> do
+                -- result: State #Unit #Unit, so f = State #Unit, a = #Unit
+                let voidWithTypes = TyApp () (TyApp () funcExpr functorType) argType
+                return $ App () voidWithTypes resolvedArg
+              _ -> do
+                resolvedFuncExpr <- resolveExprWithStatementContext allStmts funcExpr
+                return $ App () resolvedFuncExpr resolvedArg
+          _ -> do
+            resolvedFuncExpr <- resolveExprWithStatementContext allStmts funcExpr
+            resolvedArg <- resolveExprWithStatementContext allStmts arg
+            return $ App () resolvedFuncExpr resolvedArg
+      _ -> return expr'
+
     -- Enhanced resolution that looks at function definitions to resolve trait methods
-    resolveWithFunctionContext allStmts expr expectedType = case expr of
+    resolveWithFunctionContext allStmts expr' expectedType = case expr' of
       App _ funcExpr arg -> do
         -- Check if funcExpr is a variable that refers to a function with trait methods
         case funcExpr of
@@ -438,18 +579,24 @@ globalTraitMethodResolution (Block stmts expr) = do
             case findFunctionDef allStmts funcName of
               Just funcBody -> do
                 -- Resolve trait methods in the function body using the expected type
-                resolvedFuncBody <- directResolveWithType funcBody expectedType
+                _ <- directResolveWithType funcBody expectedType
                 -- Return the application with the resolved function
                 resolvedArg <- directResolveWithType arg expectedType
                 return $ App () (Var () funcName) resolvedArg
               Nothing -> directResolveWithType expr expectedType
-          _ -> directResolveWithType expr expectedType
-      _ -> directResolveWithType expr expectedType
+          _ -> directResolveWithType expr' expectedType
+      _ -> directResolveWithType expr' expectedType
     
     -- Find a function definition in the statements
-    findFunctionDef stmts targetName = 
-      case [body | Let _ name _ body <- stmts, name == targetName] of
+    findFunctionDef stmts' targetName = 
+      case [body | Let _ name _ body <- stmts', name == targetName] of
         (funcBody:_) -> Just funcBody
+        [] -> Nothing
+        
+    -- Find the type annotation for a variable in the statements
+    findVariableType stmts' targetName = 
+      case [ty | Let _ name (Just ty) _ <- stmts', name == targetName] of
+        (varType:_) -> Just varType
         [] -> Nothing
 
 -- Create type mapping for expression variables

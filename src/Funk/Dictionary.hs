@@ -3,12 +3,9 @@
 module Funk.Dictionary where
 
 import qualified Data.Map as Map
-import qualified Data.Set as Set
-import Data.Maybe (mapMaybe)
 import Control.Monad.State
 
 import Funk.Core
-import Funk.STerm
 import Funk.Term (Ident(..), unIdent)
 import qualified Funk.Term as Term
 
@@ -34,8 +31,8 @@ extractTraitInfo stmts = do
       Term.Trait traitName _typeVars methods -> do
         let traitNameStr = unIdent traitName
         let methodNames = map (unIdent . fst) methods
-        state <- get
-        put state { dictTraits = Map.insert traitNameStr ("f", methodNames) (dictTraits state) }
+        dictState <- get
+        put dictState { dictTraits = Map.insert traitNameStr ("f", methodNames) (dictTraits dictState) }
       _ -> return ()
 
 -- | Extract instance definitions from statements
@@ -53,8 +50,8 @@ extractInstanceInfo stmts = do
               _ -> "Unknown"
         -- Convert method implementations to core expressions
         methodImpls <- mapM (compileMethodImpl . snd) methods
-        state <- get
-        put state { dictInstances = Map.insert (traitNameStr, instanceTypeStr) methodImpls (dictInstances state) }
+        dictState <- get
+        put dictState { dictInstances = Map.insert (traitNameStr, instanceTypeStr) methodImpls (dictInstances dictState) }
       _ -> return ()
     
     compileMethodImpl :: Term.Expr Ident -> DictM CoreExpr
@@ -65,9 +62,7 @@ extractInstanceInfo stmts = do
         Term.Lam _ param mtype body -> do
           -- Compile lambda with proper type handling
           let paramVar = Var (unIdent param)
-          let argType = case mtype of
-                Just ty -> compileTypeSimple ty
-                Nothing -> TyUnit
+          let argType = maybe TyUnit compileTypeSimple mtype
           bodyExpr <- compileMethodImpl body
           return $ CoreLam paramVar argType bodyExpr
         Term.App _ func arg -> do
@@ -75,11 +70,10 @@ extractInstanceInfo stmts = do
           funcExpr <- compileMethodImpl func
           argExpr <- compileMethodImpl arg
           return $ CoreApp funcExpr argExpr
-        Term.BlockExpr _ (Term.Block stmts blockExpr) -> do
+        Term.BlockExpr _ (Term.Block _ blockExpr') -> do
           -- Compile block expressions
-          compiledExpr <- compileMethodImpl blockExpr
           -- For now, ignore statements in method implementations
-          return compiledExpr
+          compileMethodImpl blockExpr'
         Term.RecordCreation _ _ fields -> do
           -- Compile record creation (like State { runState = ... })
           let conName = "State"  -- Assume State constructor
@@ -100,8 +94,8 @@ extractInstanceInfo stmts = do
 -- | Generate dictionary constructor for a trait instance
 generateDictConstructor :: String -> String -> DictM CoreExpr
 generateDictConstructor traitName typeName = do
-  state <- get
-  case Map.lookup (traitName, typeName) (dictInstances state) of
+  dictState <- get
+  case Map.lookup (traitName, typeName) (dictInstances dictState) of
     Just methods -> do
       let targetType = TyCon typeName
       return $ CoreDict traitName targetType methods
@@ -111,7 +105,7 @@ generateDictConstructor traitName typeName = do
 
 -- | Transform trait method calls to dictionary accesses
 transformTraitMethod :: String -> String -> String -> CoreExpr -> CoreExpr
-transformTraitMethod traitName typeName methodName dictVar = 
+transformTraitMethod _ _ methodName dictVar = 
   CoreDictAccess dictVar methodName
 
 -- | Get dictionary variable name for a trait and type
@@ -120,7 +114,7 @@ getDictVarName traitName typeName = "dict_" ++ traitName ++ "_" ++ typeName
 
 -- | Transform a function with trait constraints to take dictionary parameters
 transformConstrainedFunction :: Term.Expr Ident -> DictM CoreExpr
-transformConstrainedFunction expr = do
+transformConstrainedFunction _ = do
   -- This is a simplified transformation - a full implementation would:
   -- 1. Identify trait constraints in the function type
   -- 2. Add dictionary parameters for each constraint

@@ -110,7 +110,7 @@ compileResolvedExpr = \case
       Just ty -> compileType ty
       Nothing -> do
         -- Use a fresh type variable for untyped lambdas
-        freshTyVar "a" >>= return . CoreTyVar
+        CoreTyVar <$> freshTyVar "a"
     
     coreBody <- compileResolvedExpr body
     return $ CoreLam var argType coreBody

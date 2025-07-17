@@ -41,8 +41,8 @@ generateBidirectionalConstraints expr expectedType = case expr of
       
       -- Case 2: Function application where function is another app
       -- This handles: void (pure@target arg) where we need to infer target from expected type
-      App _ innerFunc innerArg -> case innerFunc of
-        TraitMethod methodType _ _ targetType methodName -> do
+      App _ innerFunc _ -> case innerFunc of
+        TraitMethod methodType _ _ targetType _ -> do
           -- This is void (pure@target arg) where expected result helps infer target
           -- Strategy: pure@target :: #Unit -> target #Unit
           -- And void :: target #Unit -> target #Unit (from void signature)
