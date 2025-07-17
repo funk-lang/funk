@@ -22,6 +22,7 @@ data Type b
   | TConstraint b [b] (Type b) (Type b)
   | TApp (Type b) (Type b)
   | TList (Type b)
+  | TIO (Type b)
   | TUnit
   deriving (Show, Eq)
 
@@ -63,6 +64,9 @@ prettyType p (TApp t1 t2) =
 prettyType p (TList t) =
   let s = prettyType AtomPrec t
    in parensIf (p > AtomPrec) (text "#List" <+> s)
+prettyType p (TIO t) =
+  let s = prettyType AtomPrec t
+   in parensIf (p > AtomPrec) (text "#IO" <+> s)
 prettyType _ TUnit = text "#Unit"
 
 parensIf :: Bool -> Doc -> Doc
@@ -118,6 +122,7 @@ data Expr b
   | PrimUnit (BVar b)
   | PrimNil (BVar b) (Type (BTVar b))
   | PrimCons (BVar b) (Type (BTVar b)) (Expr b) (Expr b)
+  | PrimPrint (BVar b) (Expr b)
 
 data Stmt b
   = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
@@ -256,6 +261,9 @@ prettyExpr p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExpr AtomPrec headExpr
       tailDoc = prettyExpr AtomPrec tailExpr
    in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
+prettyExpr p (PrimPrint _ expr) =
+  let exprDoc = prettyExpr AtomPrec expr
+   in parensIf (p > AppPrec) (text "#print" <+> exprDoc)
 
 data Block b = Block [Stmt b] (Expr b)
 
@@ -328,6 +336,9 @@ prettyExprWithTypes typeMap p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExprWithTypes typeMap AtomPrec headExpr
       tailDoc = prettyExprWithTypes typeMap AtomPrec tailExpr
    in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
+prettyExprWithTypes typeMap p (PrimPrint _ expr) =
+  let exprDoc = prettyExprWithTypes typeMap AtomPrec expr
+   in parensIf (p > AppPrec) (text "#print" <+> exprDoc)
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =

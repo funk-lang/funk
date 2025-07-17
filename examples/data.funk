@@ -1,0 +1,7 @@
+data Maybe a = {
+  nothing: #Unit,
+  just: a
+}
+
+let result = Maybe { just = #Unit };
+result

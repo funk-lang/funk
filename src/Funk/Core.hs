@@ -23,6 +23,7 @@ data CoreType
   | TyApp CoreType CoreType              -- Type application
   | TyUnit                               -- Unit type
   | TyList CoreType                      -- List type
+  | TyIO CoreType                        -- IO type
   | TyCon String                         -- Type constructors (State, etc.)
   deriving (Eq)
 
@@ -41,6 +42,9 @@ data CoreExpr
   | CoreCons CoreType CoreExpr CoreExpr  -- List constructor
   | CoreDict String CoreType [CoreExpr]  -- Dictionary construction
   | CoreDictAccess CoreExpr String       -- Dictionary method access
+  | CoreReturn CoreExpr                  -- IO return (pure value wrapped in IO)
+  | CoreBind CoreExpr CoreExpr           -- IO bind (monadic sequencing)
+  | CorePrint CoreExpr                   -- Primitive print function
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -85,6 +89,9 @@ prettyCoreType _ TyUnit = text "Unit"
 prettyCoreType p (TyList t) =
   let t' = prettyCoreType (p+1) t
   in parensIf (p > 0) (text "List" <+> t')
+prettyCoreType p (TyIO t) =
+  let t' = prettyCoreType (p+1) t
+  in parensIf (p > 0) (text "IO" <+> t')
 prettyCoreType _ (TyCon name) = text name
 
 -- | Pretty printing for core expressions
@@ -140,6 +147,16 @@ prettyCoreExpr p (CoreDictAccess dict methodName) =
   let dict' = prettyCoreExpr (p+1) dict
       methodName' = text methodName
   in parensIf (p > 0) (dict' <> text "." <> methodName')
+prettyCoreExpr p (CoreReturn expr) =
+  let expr' = prettyCoreExpr (p+1) expr
+  in parensIf (p > 0) (text "return" <+> expr')
+prettyCoreExpr p (CoreBind expr1 expr2) =
+  let expr1' = prettyCoreExpr (p+1) expr1
+      expr2' = prettyCoreExpr (p+1) expr2
+  in parensIf (p > 0) (expr1' <+> text ">>=" <+> expr2')
+prettyCoreExpr p (CorePrint expr) =
+  let expr' = prettyCoreExpr (p+1) expr
+  in parensIf (p > 0) (text "print" <+> expr')
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =

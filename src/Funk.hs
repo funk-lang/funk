@@ -11,20 +11,24 @@ import Funk.Solver
 import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token
-import Funk.Compiler (compileAndShow)
+import Funk.Compiler (compile)
+import Funk.Interpreter (evalProgram, prettyValue)
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Error
 import qualified Text.PrettyPrint as Pretty
 
-newtype Options = Options
+data Options = Options
   { optionsFilePath :: FilePath
+  , optionsInterpret :: Bool
   }
 
 options :: Parser Options
 options =
-  Options <$> argument str (metavar "FILE" <> help "Path to the input file")
+  Options 
+    <$> argument str (metavar "FILE" <> help "Path to the input file")
+    <*> switch (long "interpret" <> short 'i' <> help "Run the interpreter instead of pretty-printing")
 
 run :: IO ()
 run = do
@@ -34,9 +38,17 @@ run = do
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
-      -- Output the pretty-printed resolved AST with proper type resolution
-      resolvedBlock <- sBlockToDisplayWithTypes block
-      putStrLn $ showFileWithTypes [] resolvedBlock
+      if optionsInterpret opts
+        then do
+          -- Compile to Core and run interpreter
+          coreProgram <- compile block
+          case evalProgram coreProgram of
+            Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
+            Right value -> putStrLn $ prettyValue value
+        else do
+          -- Output the pretty-printed resolved AST with proper type resolution
+          resolvedBlock <- sBlockToDisplayWithTypes block
+          putStrLn $ showFileWithTypes [] resolvedBlock
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
