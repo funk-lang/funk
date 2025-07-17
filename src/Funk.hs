@@ -11,6 +11,7 @@ import Funk.Solver
 import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token
+import Funk.Compiler (compileAndShow)
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
@@ -33,9 +34,9 @@ run = do
   case res of
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
-      block' <- sBlockToDisplay block
-      typeMap <- extractTypeMapping (blockExpr block)
-      putStrLn $ showFileWithTypes typeMap block'
+      -- Output the compiled core representation
+      coreOutput <- compileAndShow block
+      putStrLn coreOutput
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
