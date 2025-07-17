@@ -148,6 +148,11 @@ primConsExpr = do
   headExpr <- atomicExpr
   PrimCons () ty headExpr <$> atomicExpr
 
+primPrintExpr :: Parser PExpr
+primPrintExpr = do
+  tok TokPrint
+  PrimPrint () <$> atomicExpr
+
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
 
@@ -205,6 +210,7 @@ atomicExpr =
       primUnitExpr,
       primNilExpr,
       primConsExpr,
+      primPrintExpr,
       varExpr,
       parensExpr,
       try blockExpr

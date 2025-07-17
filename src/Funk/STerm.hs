@@ -51,6 +51,7 @@ typePos (TForall ref _) = do
 typePos (TConstraint _ _ targetType _) = typePos targetType
 typePos (TApp t1 _) = typePos t1
 typePos (TList t) = typePos t
+typePos (TIO t) = typePos t
 typePos TUnit = return (Pos.newPos "" 1 1)
 
 
@@ -154,7 +155,7 @@ resolveTraitMethodTargets sexpr = do
 resolveLambdaWithTypeAnnotation :: SExpr -> Type Ident -> IO (Expr Ident)
 resolveLambdaWithTypeAnnotation sexpr annotationType = do
   case sexpr of
-    Lam (SLam inputType _) binding mty body -> do
+    Lam (SLam _inputType _) binding _mty body -> do
       binding' <- sBindingToIdent binding
       
       -- Extract parameter type from the annotation type
@@ -321,6 +322,7 @@ typeOf = \case
   PrimUnit ty -> ty
   PrimNil ty _ -> ty
   PrimCons ty _ _ _ -> ty
+  PrimPrint ty _ -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -378,6 +380,9 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     head' <- sExprToDisplayWithTypes headExpr
     tail' <- sExprToDisplayWithTypes tailExpr
     return $ PrimCons () ty' head' tail'
+  PrimPrint _ expr -> do
+    expr' <- sExprToDisplayWithTypes expr
+    return $ PrimPrint () expr'
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)
@@ -426,6 +431,9 @@ sTypeToDisplay = sTypeToDisplayHelper []
       TList t -> do
         t' <- sTypeToDisplayHelper visited t
         return $ TList t'
+      TIO t -> do
+        t' <- sTypeToDisplayHelper visited t
+        return $ TIO t'
       TUnit -> return TUnit
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
@@ -513,15 +521,12 @@ globalTraitMethodResolution (Block stmts expr) = do
         return $ Let () var (Just annotationType) resolvedBody
       other -> return other
 
-    -- Extract parameter types from function types
-    extractParamTypes :: Type Ident -> [Type Ident]
-    extractParamTypes (TArrow paramType restType) = paramType : extractParamTypes restType
-    extractParamTypes _ = []
+
     
     -- Resolve lambda with expected type to get proper parameter type annotations
     resolveLambdaWithExpectedType :: Expr Ident -> Type Ident -> IO (Expr Ident)
     resolveLambdaWithExpectedType expr expectedType = case expr of
-      Lam _ param mty body -> do
+      Lam _ param _mty body -> do
         let expectedType' = case expectedType of
               -- Strip forall to get to the arrow type
               TForall _ innerType -> innerType

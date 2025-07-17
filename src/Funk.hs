@@ -12,7 +12,7 @@ import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token
 import Funk.Compiler (compile)
-import Funk.Interpreter (evalProgram, prettyValue)
+import Funk.Interpreter (evalProgramIO, prettyValue)
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
@@ -42,9 +42,10 @@ run = do
         then do
           -- Compile to Core and run interpreter
           coreProgram <- compile block
-          case evalProgram coreProgram of
+          result <- evalProgramIO coreProgram
+          case result of
             Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
-            Right value -> putStrLn $ prettyValue value
+            Right result -> putStrLn $ prettyValue result
         else do
           -- Output the pretty-printed resolved AST with proper type resolution
           resolvedBlock <- sBlockToDisplayWithTypes block

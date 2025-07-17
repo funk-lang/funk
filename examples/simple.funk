@@ -1,2 +1,2 @@
-let result = #Unit;
-result
+let main = #print #Unit;
+main

@@ -77,6 +77,7 @@ compileType = \case
   Term.TApp t1 t2 -> TyApp <$> compileType t1 <*> compileType t2
   Term.TUnit -> return TyUnit
   Term.TList t -> TyList <$> compileType t
+  Term.TIO t -> TyIO <$> compileType t
   Term.TConstraint _traitName _typeVars targetType _bodyType -> do
     -- For now, compile trait constraints to their target type
     -- In a full implementation, this would handle dictionary passing
@@ -174,6 +175,10 @@ compileResolvedExpr = \case
     let conName = "Record" ++ show (length fields)
     fieldExprs <- mapM (compileResolvedExpr . snd) fields
     return $ CoreCon conName fieldExprs
+  
+  Term.PrimPrint _ expr -> do
+    coreExpr <- compileResolvedExpr expr
+    return $ CorePrint coreExpr
 
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr
@@ -270,7 +275,14 @@ compileProgram (Term.Block stmts expr) = do
       
       -- Compile data types and main expression
       dataTypes <- extractDataTypes stmts
-      main <- compileResolvedBlock resolvedBlock
+      mainExpr <- compileResolvedBlock resolvedBlock
+      
+      -- Wrap the main expression in IO if it's not already an IO action
+      -- For now, we'll wrap it in a print statement to make it an IO action
+      main <- case mainExpr of
+        CorePrint _ -> return mainExpr  -- Already an IO action
+        _ -> return $ CorePrint mainExpr  -- Wrap in print to make it IO
+      
       return $ CoreProgram dataTypes main
 
 -- | Main compilation function

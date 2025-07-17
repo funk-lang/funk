@@ -147,6 +147,10 @@ constraintsExpr = \case
                CEq (TVar (typeOf headExpr)) elemTy,
                CEq (TVar (typeOf tailExpr)) (TList elemTy)
              ] ++ csHead ++ csTail
+  PrimPrint ty expr -> do
+    -- #print expr has type #IO #Unit
+    csExpr <- constraintsExpr expr
+    return $ [ CEq (TVar ty) (TIO TUnit) ] ++ csExpr
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do

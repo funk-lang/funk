@@ -46,6 +46,12 @@ kindInferType = \case
     pos <- liftIO $ typePos t
     starKind <- freshStarKind pos
     return $ cs ++ [KEq (KVar $ error "need kind var for list elem") starKind]
+  TIO t -> do
+    cs <- kindInferType t
+    -- IO constructor has kind * -> *, so inner type must have kind *
+    pos <- liftIO $ typePos t
+    starKind <- freshStarKind pos
+    return $ cs ++ [KEq (KVar $ error "need kind var for io elem") starKind]
   TConstraint _ _ _ bodyType -> do
     -- Constraint types have the same kind as their body type
     kindInferType bodyType

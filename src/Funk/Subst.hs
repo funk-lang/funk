@@ -190,6 +190,10 @@ substExpr pexpr = case pexpr of
     head' <- substExpr headExpr
     tail' <- substExpr tailExpr
     return $ PrimCons iTy ty' head' tail'
+  PrimPrint _ expr -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    expr' <- substExpr expr
+    return $ PrimPrint iTy expr'
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"

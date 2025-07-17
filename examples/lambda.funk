@@ -1,3 +1,4 @@
 let id: forall a . a -> a = \x -> x;
 let result = id #Unit;
-result
+let main = #print result;
+main

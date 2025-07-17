@@ -47,6 +47,7 @@ data Token
   | TokUnit
   | TokNil
   | TokCons
+  | TokPrint
   deriving (Eq)
 
 instance Show Token where
@@ -81,6 +82,7 @@ instance Show Token where
     TokUnit -> "'#Unit'"
     TokNil -> "'#nil'"
     TokCons -> "'#cons'"
+    TokPrint -> "'#print'"
 
 token :: Parser (Located Token)
 token = do
@@ -124,6 +126,7 @@ token = do
         "#Unit" -> TokUnit
         "#nil" -> TokNil
         "#cons" -> TokCons
+        "#print" -> TokPrint
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

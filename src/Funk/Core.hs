@@ -61,10 +61,10 @@ data CoreDataType = CoreDataType
   , coreDataCons :: [(String, [CoreType])]
   } deriving (Eq)
 
--- | Core program consisting of data types and a main expression
+-- | Core program consisting of data types and a main function
 data CoreProgram = CoreProgram
   { coreDataTypes :: [CoreDataType]
-  , coreMain :: CoreExpr
+  , coreMain :: CoreExpr  -- This should be of type IO ()
   } deriving (Eq)
 
 -- | Pretty printing for core types
