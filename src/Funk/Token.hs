@@ -21,6 +21,7 @@ data Token
   | TokLambda
   | TokForall
   | TokArrow
+  | TokConstraintArrow
   | TokDot
   | TokColon
   | TokDoubleColon
@@ -54,6 +55,7 @@ instance Show Token where
     TokLambda -> "'\\'"
     TokForall -> "'forall'"
     TokArrow -> "'->'"
+    TokConstraintArrow -> "=>"
     TokDot -> "."
     TokColon -> ":"
     TokDoubleColon -> "'::''"
@@ -87,6 +89,7 @@ token = do
     choice
       [ TokLambda <$ char '\\',
         TokArrow <$ try (string "->"),
+        TokConstraintArrow <$ try (string "=>"),
         TokDoubleColon <$ try (string "::"),
         TokDot <$ char '.',
         TokColon <$ char ':',

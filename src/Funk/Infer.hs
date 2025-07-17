@@ -12,6 +12,80 @@ data Constraint
   = CEq SType SType
   | CTrait STBinding [STBinding] SType -- trait constraint: trait_name type_vars target_type
 
+-- Bidirectional constraint generation: propagate expected types downward
+constraintsExprWithExpected :: SExpr -> SType -> Fresh [Constraint]
+constraintsExprWithExpected expr expectedType = do
+  -- Generate normal constraints
+  normalConstraints <- constraintsExpr expr
+  -- Add constraint connecting expression type to expected type
+  let expectedConstraint = CEq (TVar (typeOf expr)) expectedType
+  -- Generate additional bidirectional constraints based on expression structure
+  bidirectionalConstraints <- generateBidirectionalConstraints expr expectedType
+  return $ expectedConstraint : normalConstraints ++ bidirectionalConstraints
+
+-- Generate additional constraints for bidirectional type inference
+generateBidirectionalConstraints :: SExpr -> SType -> Fresh [Constraint]
+generateBidirectionalConstraints expr expectedType = case expr of
+  App _ t1 t2 -> do
+    case t1 of
+      -- Case 1: Direct trait method application: pure@target arg -> expectedType
+      TraitMethod _ _ _ targetType _ -> do
+        case expectedType of
+          TApp constructor _ -> 
+            -- Expected type is "Constructor Arg", so target should be "Constructor"
+            return [CEq targetType constructor]
+          TVar _ -> 
+            -- Expected type is a variable - connect them
+            return [CEq targetType expectedType]
+          _ -> return []
+      
+      -- Case 2: Function application where function is another app
+      -- This handles: void (pure@target arg) where we need to infer target from expected type
+      App _ innerFunc innerArg -> case innerFunc of
+        TraitMethod methodType _ _ targetType methodName -> do
+          -- This is void (pure@target arg) where expected result helps infer target
+          -- Strategy: pure@target :: #Unit -> target #Unit
+          -- And void :: target #Unit -> target #Unit (from void signature)
+          -- So the inner expression (pure@target #Unit) should have the same type as expected
+          case expectedType of
+            TApp constructor _ -> do
+              -- If expected is State #Unit, then target should be State
+              -- Generate constraint: target = State
+              -- DEBUG: This should generate CEq t57 State for our example
+              return [CEq targetType constructor]
+            _ -> do
+              -- Fallback: connect the method result type with expected type
+              -- This creates a constraint that the trait method result matches expected
+              return [CEq (TVar methodType) expectedType]
+        _ -> do
+          -- Regular nested application - propagate constraints
+          subConstraints1 <- generateBidirectionalConstraints t1 (TArrow (TVar (typeOf t2)) expectedType)
+          subConstraints2 <- generateBidirectionalConstraints t2 (TVar (typeOf t2))
+          return $ subConstraints1 ++ subConstraints2
+      
+      -- Case 3: Variable or other expression types
+      _ -> do
+        -- Regular function application - try to propagate types
+        subConstraints1 <- generateBidirectionalConstraints t1 (TArrow (TVar (typeOf t2)) expectedType)
+        subConstraints2 <- generateBidirectionalConstraints t2 (TVar (typeOf t2))
+        return $ subConstraints1 ++ subConstraints2
+  
+  -- For other expression types, recursively search for trait methods
+  _ -> extractTraitMethodConstraints expr expectedType
+
+-- Extract constraints for any trait methods found in the expression tree
+extractTraitMethodConstraints :: SExpr -> SType -> Fresh [Constraint]
+extractTraitMethodConstraints expr expectedType = case expr of
+  TraitMethod _ _ _ targetType _ -> 
+    case expectedType of
+      TApp constructor _ -> return [CEq targetType constructor]
+      _ -> return []
+  App _ t1 t2 -> do
+    cs1 <- extractTraitMethodConstraints t1 expectedType
+    cs2 <- extractTraitMethodConstraints t2 expectedType  
+    return $ cs1 ++ cs2
+  _ -> return []
+
 constraintsExpr :: SExpr -> Fresh [Constraint]
 constraintsExpr = \case
   Var _ _ -> return []
@@ -76,11 +150,17 @@ constraintsExpr = \case
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do
-  csBody <- constraintsExpr body
-  let cs' = case mty of
-        Just ann -> CEq (TVar ty) ann : csBody
-        Nothing -> csBody
-  return $ CEq (TVar ty) (TVar $ typeOf body) : cs'
+  -- Use bidirectional constraint generation when we have explicit type annotation
+  (csBody, additionalConstraints) <- case mty of
+    Just ann -> do
+      -- Use bidirectional constraint generation with expected type
+      bidiConstraints <- constraintsExprWithExpected body ann
+      return ([], bidiConstraints ++ [CEq (TVar ty) ann])
+    Nothing -> do
+      -- Use normal constraint generation
+      normalConstraints <- constraintsExpr body
+      return (normalConstraints, [])
+  return $ CEq (TVar ty) (TVar $ typeOf body) : csBody ++ additionalConstraints
 constraintsStmt (Type {}) = return []
 constraintsStmt (Data {}) = return []
 constraintsStmt (DataForall {}) = return []

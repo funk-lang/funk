@@ -86,6 +86,12 @@ substTy pty = case pty of
     ref <- freshSkolem i
     st <- substTy t
     return $ TForall ref st
+  TConstraint traitName typeVars targetType bodyType -> do
+    traitName' <- freshSkolem traitName
+    typeVars' <- mapM freshSkolem typeVars
+    targetType' <- substTy targetType
+    bodyType' <- substTy bodyType
+    return $ TConstraint traitName' typeVars' targetType' bodyType'
   TApp t1 t2 -> TApp <$> substTy t1 <*> substTy t2
   TList t -> TList <$> substTy t
   TUnit -> return TUnit
@@ -178,11 +184,11 @@ substExpr pexpr = case pexpr of
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     ty' <- substTy ty
     return $ PrimNil iTy ty'
-  PrimCons _ ty head tail -> do
+  PrimCons _ ty headExpr tailExpr -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     ty' <- substTy ty
-    head' <- substExpr head
-    tail' <- substExpr tail
+    head' <- substExpr headExpr
+    tail' <- substExpr tailExpr
     return $ PrimCons iTy ty' head' tail'
   where
     getTVarName (TVar ident) = unLocated ident

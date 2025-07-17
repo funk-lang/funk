@@ -93,8 +93,18 @@ typeAppExpr = do
       )
         <|> return t
 
+constraintType :: Parser PType
+constraintType = do
+  traitName <- fmap Ident <$> identTok
+  typeVars <- many (fmap Ident <$> identTok)
+  tok TokConstraintArrow
+  targetType <- typeAppExpr
+  tok TokArrow
+  bodyType <- typeExpr
+  return $ TConstraint traitName typeVars targetType bodyType
+
 typeExpr :: Parser PType
-typeExpr = chainr1 typeAppExpr (tok TokArrow $> TArrow)
+typeExpr = try constraintType <|> chainr1 typeAppExpr (tok TokArrow $> TArrow)
 
 kindVar :: Parser PKind
 kindVar = KVar . fmap Ident <$> identTok
@@ -136,9 +146,9 @@ primConsExpr = do
   tok TokLBracket
   ty <- typeExpr
   tok TokRBracket
-  head <- atomicExpr
-  tail <- atomicExpr
-  return $ PrimCons () ty head tail
+  headExpr <- atomicExpr
+  tailExpr <- atomicExpr
+  return $ PrimCons () ty headExpr tailExpr
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
@@ -248,14 +258,8 @@ dataStmt :: Parser PStmt
 dataStmt = do
   tok TokData
   v <- fmap Ident <$> identTok
+  typeParams <- many (fmap Ident <$> identTok)
   tok TokEq
-  -- Handle optional forall quantification
-  mbForallPart <- optionMaybe $ do
-    tok TokForall
-    vars <- many1 (fmap Ident <$> identTok)
-    tok TokDot
-    return vars
-  -- Parse the record type
   tok TokLBrace
   fields <-
     sepBy
@@ -267,9 +271,9 @@ dataStmt = do
       )
       (tok TokComma)
   tok TokRBrace
-  case mbForallPart of
-    Nothing -> return $ Data v fields
-    Just vars -> return $ DataForall v vars fields
+  if null typeParams
+    then return $ Data v fields
+    else return $ DataForall v typeParams fields
 
 traitStmt :: Parser PStmt
 traitStmt = do

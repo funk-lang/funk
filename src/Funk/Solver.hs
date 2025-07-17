@@ -40,6 +40,10 @@ prune (TForall v t) = TForall v <$> prune t
 prune (TApp t1 t2) = TApp <$> prune t1 <*> prune t2
 prune (TList t) = TList <$> prune t
 prune TUnit = return TUnit
+prune (TConstraint traitName typeVars targetType bodyType) = do
+  targetType' <- prune targetType
+  bodyType' <- prune bodyType
+  return $ TConstraint traitName typeVars targetType' bodyType'
 
 freshUnboundTyS :: SourcePos -> Solver STBinding
 freshUnboundTyS pos = do
@@ -97,6 +101,48 @@ unify t1 t2 = do
       fresh <- freshUnboundTyS pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
+    (TApp (TVar v) arg, other) -> do
+      -- Type application with type variable on left - try to bind the type variable
+      v' <- liftIO $ readIORef v
+      case v' of
+        Unbound {} -> do
+          -- Try to bind the type variable to a function type that can produce 'other'
+          -- This is a heuristic - we assume the type variable should be bound to a function type
+          freshArg <- freshUnboundTyS pos
+          let functionType = TArrow (TVar freshArg) other
+          bindVar v functionType
+        _ -> throwError [UnificationError ta tb]
+    (other, TApp (TVar v) arg) -> do
+      -- Type application with type variable on right - try to bind the type variable
+      v' <- liftIO $ readIORef v
+      case v' of
+        Unbound {} -> do
+          -- Try to bind the type variable to a function type that can produce 'other'
+          freshArg <- freshUnboundTyS pos
+          let functionType = TArrow (TVar freshArg) other
+          bindVar v functionType
+        _ -> throwError [UnificationError ta tb]
+    (TConstraint traitName typeVars targetType bodyType, other) -> do
+      -- Emit trait constraint and unify body type
+      -- First, skolemize the type variables in the constraint type
+      freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
+      let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) targetType typeVars
+      let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) bodyType typeVars
+      solveTrait traitName freshVars skolemizedTarget
+      unify skolemizedBody other
+    (other, TConstraint traitName typeVars targetType bodyType) -> do
+      -- Emit trait constraint and unify body type
+      -- First, skolemize the type variables in the constraint type
+      freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
+      let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) targetType typeVars
+      let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) bodyType typeVars
+      solveTrait traitName freshVars skolemizedTarget
+      unify other skolemizedBody
+    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
+      -- Both are constraint types - solve both constraints and unify body types
+      solveTrait traitName1 typeVars1 targetType1
+      solveTrait traitName2 typeVars2 targetType2
+      unify bodyType1 bodyType2
     _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -106,6 +152,8 @@ substituteTypeVar old new ty = case ty of
   TArrow t1 t2 -> TArrow (substituteTypeVar old new t1) (substituteTypeVar old new t2)
   TForall v t | v == old -> TForall v t
   TForall v t -> TForall v (substituteTypeVar old new t)
+  TConstraint traitName typeVars targetType bodyType ->
+    TConstraint traitName typeVars (substituteTypeVar old new targetType) (substituteTypeVar old new bodyType)
   TApp t1 t2 -> TApp (substituteTypeVar old new t1) (substituteTypeVar old new t2)
   TList t -> TList (substituteTypeVar old new t)
   TUnit -> TUnit
@@ -128,9 +176,23 @@ occursCheck v t = do
     TVar v' -> return (v == v')
     TArrow x y -> (||) <$> occursCheck v x <*> occursCheck v y
     TForall v' th -> if v == v' then return False else occursCheck v th
+    TConstraint _ _ targetType bodyType -> (||) <$> occursCheck v targetType <*> occursCheck v bodyType
     TApp t1 t2 -> (||) <$> occursCheck v t1 <*> occursCheck v t2
     TList t1 -> occursCheck v t1
     TUnit -> return False
+
+solveTrait :: STBinding -> [STBinding] -> SType -> Solver ()
+solveTrait traitName typeArgs targetType = do
+  env <- get
+  -- Prune the target type to get its canonical form
+  prunedTarget <- prune targetType
+  maybeImpl <- findMatchingImpl traitName typeArgs prunedTarget (S.envImpls env)
+  case maybeImpl of
+    Just _impl -> return () -- Implementation found, constraint satisfied
+    Nothing -> do
+      pos <- liftIO $ typePos targetType
+      throwError [MissingTraitImpl pos traitName targetType]
+
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go
@@ -138,39 +200,35 @@ solve = mapM_ go
     go (CEq t1 t2) = unify t1 t2
     go (CTrait traitName typeArgs targetType) = solveTrait traitName typeArgs targetType
 
-solveTrait :: STBinding -> [STBinding] -> SType -> Solver ()
-solveTrait traitName typeArgs targetType = do
-  env <- get
-  -- Prune the target type to get its canonical form
-  prunedTarget <- prune targetType
-
-  -- Look for matching implementation in envImpls
-  case findMatchingImpl traitName typeArgs prunedTarget (S.envImpls env) of
-    Just _impl -> return () -- Implementation found, constraint satisfied
-    Nothing -> do
-      pos <- liftIO $ typePos targetType
-      throwError [MissingTraitImpl pos traitName targetType]
-
 -- Check if two traits match by comparing their names
-traitsMatch :: STBinding -> STBinding -> IO Bool
+traitsMatch :: STBinding -> STBinding -> Solver Bool
 traitsMatch trait1 trait2 = do
-  name1 <- sTBindingToIdent trait1
-  name2 <- sTBindingToIdent trait2
+  name1 <- liftIO $ sTBindingToIdent trait1
+  name2 <- liftIO $ sTBindingToIdent trait2
   return (name1 == name2)
 
 -- Find a matching trait implementation
-findMatchingImpl :: STBinding -> [STBinding] -> SType -> [(STBinding, [STBinding], SType, SStmt)] -> Maybe SStmt
-findMatchingImpl traitName _typeArgs targetType impls =
-  case [ impl | (implTrait, _implVars, implType, impl) <- impls, let traitMatch = unsafePerformIO $ traitsMatch traitName implTrait, let typeMatch = unsafePerformIO $ typesUnify targetType implType, traitMatch && typeMatch
-       ] of
+findMatchingImpl :: STBinding -> [STBinding] -> SType -> [(STBinding, [STBinding], SType, SStmt)] -> Solver (Maybe SStmt)
+findMatchingImpl traitName _typeArgs targetType impls = do
+  matches <- forM impls $ \(implTrait, _implVars, implType, impl) -> do
+    traitMatch <- traitsMatch traitName implTrait
+    if traitMatch
+      then do
+        typeMatch <- typesUnify targetType implType
+        return $ if typeMatch then Just impl else Nothing
+      else return Nothing
+  return $ case concatMap maybeToList matches of
     (impl : _) -> Just impl
     [] -> Nothing
+  where
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
 
 -- Check if two types can unify (proper System FC unification)
-typesUnify :: SType -> SType -> IO Bool
+typesUnify :: SType -> SType -> Solver Bool
 typesUnify t1 t2 = do
-  env <- newIORef emptyUnificationEnv
-  result <- tryUnify env t1 t2
+  env <- liftIO $ newIORef emptyUnificationEnv
+  result <- liftIO $ tryUnify env t1 t2
   case result of
     Right () -> return True
     Left _ -> return False
@@ -200,6 +258,18 @@ tryUnify envRef t1 t2 = do
         else do
           modifyIORef envRef $ \env -> env { unifSubst = (v2, t) : unifSubst env }
           return $ Right ()
+    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
+      -- Both are constraint types - unify both target and body types
+      r1 <- tryUnify envRef targetType1 targetType2
+      case r1 of
+        Left err -> return $ Left err
+        Right () -> tryUnify envRef bodyType1 bodyType2
+    (TConstraint traitName typeVars targetType bodyType, other) -> do
+      -- One is constraint type - unify body type with other
+      tryUnify envRef bodyType other
+    (other, TConstraint traitName typeVars targetType bodyType) -> do
+      -- One is constraint type - unify body type with other
+      tryUnify envRef other bodyType
     (TApp t1a t1b, TApp t2a t2b) -> do
       r1 <- tryUnify envRef t1a t2a
       case r1 of
@@ -226,6 +296,10 @@ substAndPrune envRef ty = do
           case binding of
             Bound boundTy -> substAndPrune envRef boundTy
             _ -> return ty
+    TConstraint traitName typeVars targetType bodyType -> do
+      targetType' <- substAndPrune envRef targetType
+      bodyType' <- substAndPrune envRef bodyType
+      return $ TConstraint traitName typeVars targetType' bodyType'
     TApp t1 t2 -> TApp <$> substAndPrune envRef t1 <*> substAndPrune envRef t2
     TArrow t1 t2 -> TArrow <$> substAndPrune envRef t1 <*> substAndPrune envRef t2
     TForall v t -> TForall v <$> substAndPrune envRef t
@@ -240,6 +314,9 @@ occursCheckIO var ty = case ty of
     case binding of
       Bound boundTy -> occursCheckIO var boundTy
       _ -> return False
+  TConstraint _ _ targetType bodyType -> do
+    r1 <- occursCheckIO var targetType
+    if r1 then return True else occursCheckIO var bodyType
   TApp t1 t2 -> do
     r1 <- occursCheckIO var t1
     if r1 then return True else occursCheckIO var t2

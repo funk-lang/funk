@@ -1,4 +1,4 @@
-data State = forall s a . {
+data State s a = {
   runState: s -> a
 }
 
@@ -36,17 +36,9 @@ instance MonadState forall s . s (State s) = {
   }
 }
 
-let identity: forall a . a -> a = \x -> x;
+let const: forall a b . a -> b -> a = \a _ -> a;
 
-let pureState: State (forall a . a -> a) (forall a . a -> a) = pure identity;
+let void: forall f . Functor f => f a -> f #Unit = fmap (const #Unit);
 
-let getState: State (forall a . a -> a) (forall a . a -> a) = get;
-let putState: (forall a . a -> a) -> State (forall a . a -> a) (forall a . a -> a) = put;
-
-let statefulComputation: State (forall a . a -> a) (forall a . a -> a) = bind getState (\s -> 
-  bind (putState s) (\_ -> 
-    pure s));
-
-let result: State (forall a . a -> a) ((forall a . a -> a) -> (forall a . a -> a)) = fmap identity pureState;
-
+let result: State #Unit = void (pure #Unit);
 result

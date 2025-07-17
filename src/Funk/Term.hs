@@ -19,6 +19,7 @@ data Type b
   = TVar b
   | TArrow (Type b) (Type b)
   | TForall b (Type b)
+  | TConstraint b [b] (Type b) (Type b)
   | TApp (Type b) (Type b)
   | TList (Type b)
   | TUnit
@@ -48,6 +49,12 @@ prettyType p (TForall ref t) =
   let bStr = text $ show ref
       st = prettyType ForallPrec t
    in parensIf (p > ForallPrec) (text "forall" <+> bStr <+> text "." <+> st)
+prettyType p (TConstraint traitName typeVars targetType bodyType) =
+  let traitDoc = text $ show traitName
+      typeVarsDoc = hsep (punctuate (text " ") (map (text . show) typeVars))
+      targetDoc = prettyType AtomPrec targetType
+      bodyDoc = prettyType ArrowPrec bodyType
+   in parensIf (p > ArrowPrec) (traitDoc <+> typeVarsDoc <+> text "=>" <+> targetDoc <+> text "->" <+> bodyDoc)
 prettyType p (TApp t1 t2) =
   let s1 = prettyType AppPrec t1
       s2 = prettyType AtomPrec t2
@@ -107,10 +114,14 @@ data Stmt b
   | Impl (BTVar b) [BTVar b] (Type (BTVar b)) [(Ident, Expr b)]
 
 prettyStmt :: (Show b, Show (BTVar b)) => Stmt b -> Doc
-prettyStmt (Let _ b _ body) =
+prettyStmt (Let _ b mty body) =
   let bStr = text $ show b
       bodyDoc = prettyExpr AtomPrec body
-   in (text "let" <+> bStr <+> text "=" <+> bodyDoc) <> semi
+      tyDoc = case mty of
+        Just t -> text " :" <+> prettyType AtomPrec t
+        Nothing -> empty
+      letDoc = text "let" <+> (bStr <> tyDoc) <+> text "=" <+> bodyDoc
+   in letDoc <> semi
 prettyStmt (Type b t) =
   (text "type" <+> text (show b) <+> text "=" <+> prettyType AtomPrec t) <> semi
 prettyStmt (Data b fields) =
@@ -141,6 +152,47 @@ prettyStmt (Impl b vars ty methods) =
       methodsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExpr AtomPrec e) methods
    in text "instance" <+> bStr <+> varsDoc <+> text "for" <+> tyDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 
+prettyStmtWithTypes :: (Show b, Show (BTVar b), Eq b) => [(b, Type (BTVar b))] -> Stmt b -> Doc
+prettyStmtWithTypes typeMap (Let _ b mty body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExprWithTypes typeMap AtomPrec body
+      tyDoc = case mty of
+        Just t -> text " :" <+> prettyType AtomPrec t
+        Nothing -> case lookup b typeMap of
+          Just t -> text " :" <+> prettyType AtomPrec t
+          Nothing -> empty
+      letDoc = text "let" <+> (bStr <> tyDoc) <+> text "=" <+> bodyDoc
+   in letDoc <> semi
+prettyStmtWithTypes _ (Type b t) =
+  (text "type" <+> text (show b) <+> text "=" <+> prettyType AtomPrec t) <> semi
+prettyStmtWithTypes _ (Data b fields) =
+  let bStr = text $ show b
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "data" <+> bStr <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmtWithTypes _ (DataForall b vars fields) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "data" <+> bStr <+> text "=" <+> text "forall" <+> varsDoc <+> text "." <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmtWithTypes _ (Trait b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmtWithTypes _ (TraitWithKinds b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (\(v, mk) -> case mk of
+        Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+        Nothing -> text (show v)) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmtWithTypes typeMap (Impl b vars ty methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      tyDoc = prettyType AtomPrec ty
+      methodsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprWithTypes typeMap AtomPrec e) methods
+   in text "instance" <+> bStr <+> varsDoc <+> text "for" <+> tyDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+
 prettyExpr :: (Show (BTVar b), Show b) => Precedence -> Expr b -> Doc
 prettyExpr _ (Var _ b) = text $ show b
 prettyExpr p (Lam _ b mty body) =
@@ -168,19 +220,38 @@ prettyExpr p (RecordCreation _ expr fields) =
   let exprDoc = prettyExpr AtomPrec expr
       fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExpr AtomPrec e) fields
    in parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate (text ",") fieldsDoc)))
-prettyExpr p (TraitMethod _ traitName typeArgs targetType methodName) =
+prettyExpr p (TraitMethod _ traitName _ targetType methodName) =
   let traitDoc = text (show traitName)
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExpr _ (PrimUnit _) = text "#Unit"
 prettyExpr _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
-prettyExpr p (PrimCons _ ty head tail) =
-  let headDoc = prettyExpr AtomPrec head
-      tailDoc = prettyExpr AtomPrec tail
+prettyExpr p (PrimCons _ ty headExpr tailExpr) =
+  let headDoc = prettyExpr AtomPrec headExpr
+      tailDoc = prettyExpr AtomPrec tailExpr
    in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
 
--- Enhanced pretty printing that shows types for all expressions
+data Block b = Block [Stmt b] (Expr b)
+
+prettyBlock :: (Show (BTVar b), Show b) => Block b -> Doc
+prettyBlock (Block stmts expr) =
+  let stmtsDoc = vcat $ map prettyStmt stmts
+      exprDoc = prettyExpr AtomPrec expr
+   in braces (stmtsDoc $$ exprDoc)
+
+showBlock :: (Show (BTVar b), Show b) => Block b -> String
+showBlock block = render $ prettyBlock block
+
+prettyFile :: (Show (BTVar b), Show b) => Block b -> Doc
+prettyFile (Block stmts expr) =
+  let stmtsDoc = vcat $ map prettyStmt stmts
+      exprDoc = prettyExpr AtomPrec expr
+   in stmtsDoc $$ exprDoc
+
+showFile :: (Show (BTVar b), Show b) => Block b -> String
+showFile block = render $ prettyFile block
+
 prettyExprWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Precedence -> Expr b -> Doc
 prettyExprWithTypes typeMap _ (Var _ b) =
   case lookup b typeMap of
@@ -192,7 +263,7 @@ prettyExprWithTypes typeMap p (Lam _ b mty body) =
       tyDoc = case mty of
         Just t -> text ":" <+> prettyType AtomPrec t
         Nothing -> empty
-   in parensIf (p > LamPrec) (text "\\" <+> (bStr <> tyDoc) <+> text "." <+> bodyDoc)
+   in parensIf (p > LamPrec) (text "\\" <+> (bStr <> tyDoc) <+> text "->" <+> bodyDoc)
 prettyExprWithTypes typeMap p (App _ t1 t2) =
   let s1 = prettyExprWithTypes typeMap AppPrec t1
       s2 = prettyExprWithTypes typeMap AtomPrec t2
@@ -209,51 +280,31 @@ prettyExprWithTypes typeMap p (RecordType _ _ fields) =
    in parensIf (p > AtomPrec) (braces (hsep (punctuate (text ",") fieldsDoc)))
 prettyExprWithTypes typeMap p (RecordCreation _ expr fields) =
   let exprDoc = prettyExprWithTypes typeMap AtomPrec expr
-      fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text ":") <+> prettyExprWithTypes typeMap AtomPrec e) fields
+      fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprWithTypes typeMap AtomPrec e) fields
    in parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate (text ",") fieldsDoc)))
-prettyExprWithTypes typeMap p (TraitMethod _ traitName typeArgs targetType methodName) =
+prettyExprWithTypes typeMap p (TraitMethod _ traitName _ targetType methodName) =
   let traitDoc = text (show traitName)
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExprWithTypes _ _ (PrimUnit _) = text "#Unit"
 prettyExprWithTypes _ _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
-prettyExprWithTypes typeMap p (PrimCons _ ty head tail) =
-  let headDoc = prettyExprWithTypes typeMap AtomPrec head
-      tailDoc = prettyExprWithTypes typeMap AtomPrec tail
+prettyExprWithTypes typeMap p (PrimCons _ ty headExpr tailExpr) =
+  let headDoc = prettyExprWithTypes typeMap AtomPrec headExpr
+      tailDoc = prettyExprWithTypes typeMap AtomPrec tailExpr
    in parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
-
-data Block b = Block [Stmt b] (Expr b)
-
-prettyBlock :: (Show (BTVar b), Show b) => Block b -> Doc
-prettyBlock (Block stmts expr) =
-  let stmtsDoc = vcat $ map prettyStmt stmts
-      exprDoc = prettyExpr AtomPrec expr
-   in braces (stmtsDoc $$ exprDoc)
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =
-  let stmtsDoc = vcat $ map prettyStmt stmts
+  let stmtsDoc = vcat $ map (prettyStmtWithTypes typeMap) stmts
       exprDoc = prettyExprWithTypes typeMap AtomPrec expr
    in braces (stmtsDoc $$ exprDoc)
 
-showBlock :: (Show (BTVar b), Show b) => Block b -> String
-showBlock block = render $ prettyBlock block
-
-prettyFile :: (Show (BTVar b), Show b) => Block b -> Doc
-prettyFile (Block stmts expr) =
-  let stmtsDoc = vcat $ map prettyStmt stmts
-      exprDoc = prettyExpr AtomPrec expr
-   in stmtsDoc $$ exprDoc
-
 prettyFileWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyFileWithTypes typeMap (Block stmts expr) =
-  let stmtsDoc = vcat $ map prettyStmt stmts
+  let stmtsDoc = vcat $ map (prettyStmtWithTypes typeMap) stmts
       exprDoc = prettyExprWithTypes typeMap AtomPrec expr
    in stmtsDoc $$ exprDoc
-
-showFile :: (Show (BTVar b), Show b) => Block b -> String
-showFile block = render $ prettyFile block
 
 showFileWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> String
 showFileWithTypes typeMap block = render $ prettyFileWithTypes typeMap block

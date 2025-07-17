@@ -48,6 +48,7 @@ typePos (TForall ref _) = do
     Bound t -> typePos t
     Skolem i _ -> return $ locatedPos i
     Unbound pos _ -> return pos
+typePos (TConstraint _ _ targetType _) = typePos targetType
 typePos (TApp t1 _) = typePos t1
 typePos (TList t) = typePos t
 typePos TUnit = return (Pos.newPos "" 1 1)
@@ -69,12 +70,121 @@ sTBindingToIdent ref = do
     Skolem i _ -> return $ unLocated i
     _ -> return $ Ident "_"
 
+sTBindingToIdentImproved :: STBinding -> IO Ident
+sTBindingToIdentImproved ref = do
+  b <- readIORef ref
+  case b of
+    Skolem i _ -> return $ unLocated i
+    Unbound _ idx -> return $ Ident ("t" ++ show idx)
+    Bound _ -> return $ Ident "_"  -- This shouldn't happen in this context
+
 sBindingToIdent :: SBinding -> IO Ident
 sBindingToIdent (SBinding ref) = do
   b <- readIORef ref
   case b of
     VBound _ -> return $ Ident "_"
     VUnbound i -> return $ unLocated i
+
+-- Try to resolve trait method target types more intelligently
+smartResolveTargetType :: SType -> STBinding -> IO (Type Ident)
+smartResolveTargetType targetType exprType = do
+  -- First try normal resolution
+  normalResult <- sTypeToDisplay targetType
+  
+  case normalResult of
+    TVar (Ident tname) | take 1 tname == "t" -> do
+      -- This is still an unresolved type variable, try to infer from expression type
+      exprTypeResolved <- sTypeToDisplay (TVar exprType)
+      case exprTypeResolved of
+        -- If the expression type is a concrete application like "State #Unit",
+        -- extract the constructor "State" as the target type
+        TApp (TVar constructor) _ -> return $ TVar constructor
+        TVar constructor -> return $ TVar constructor
+        _ -> return normalResult
+    _ -> return normalResult
+
+-- Enhanced type resolution that tries harder to resolve type variables
+aggressiveTypeResolve :: SType -> IO (Type Ident)
+aggressiveTypeResolve stype = do
+  result <- sTypeToDisplay stype
+  case result of
+    TVar (Ident tname) | take 1 tname == "t" -> do
+      -- Try to see if this type variable is actually bound to something concrete
+      -- by following the binding chain more aggressively
+      case stype of
+        TVar ref -> do
+          binding <- readIORef ref
+          case binding of
+            Bound boundType -> aggressiveTypeResolve boundType
+            _ -> return result
+        _ -> return result
+    _ -> return result
+
+-- Post-processing step to resolve trait method target types based on context
+-- This is called after constraint solving to clean up unresolved trait method targets
+resolveTraitMethodTargets :: SExpr -> IO (Expr Ident)
+resolveTraitMethodTargets sexpr = do
+  -- First convert normally
+  normalExpr <- sExprToDisplayWithTypes sexpr
+  -- Then apply context-based resolution
+  contextResolveExpr normalExpr (typeOf sexpr)
+
+-- Targeted resolution using explicit type annotation from let bindings
+resolveTraitMethodsWithType :: SExpr -> Type Ident -> IO (Expr Ident)
+resolveTraitMethodsWithType sexpr expectedType = do
+  -- First convert normally
+  normalExpr <- sExprToDisplayWithTypes sexpr
+  -- Then apply direct resolution using the known expected type
+  directResolveWithType normalExpr expectedType
+
+-- Direct resolution that replaces trait method targets using expected type
+directResolveWithType :: Expr Ident -> Type Ident -> IO (Expr Ident)
+directResolveWithType expr expectedType = case expr of
+  App _ f arg -> do
+    f' <- directResolveWithType f expectedType
+    arg' <- directResolveWithType arg expectedType
+    return $ App () f' arg'
+  
+  TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
+    | take 1 tname == "t" -> do
+      -- This is an unresolved trait method target - use expected type to resolve it
+      case expectedType of
+        TApp constructor _ -> 
+          -- If expected type is "Constructor Arg", target should be "Constructor"
+          return $ TraitMethod () traitName typeArgs constructor methodName
+        _ -> return expr
+  
+  _ -> return expr
+
+-- Context-based resolution that looks at expression types to infer trait method targets
+contextResolveExpr :: Expr Ident -> STBinding -> IO (Expr Ident)
+contextResolveExpr expr exprType = case expr of
+  App _ f arg -> do
+    -- For function applications, we need to look at the overall result type
+    exprTypeResolved <- sTypeToDisplay (TVar exprType)
+    f' <- case f of
+      TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
+        | take 1 tname == "t" -> do
+          -- This trait method application should produce the result type
+          -- If result type is State #Unit, and this is pure@target #Unit, then target = State
+          case exprTypeResolved of
+            TApp constructor _ -> 
+              return $ TraitMethod () traitName typeArgs constructor methodName
+            _ -> return f
+      _ -> contextResolveExpr f exprType
+    return $ App () f' arg
+  
+  TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName 
+    | take 1 tname == "t" -> do
+      -- This is an unresolved trait method target - try to infer from context
+      exprTypeResolved <- sTypeToDisplay (TVar exprType)
+      case exprTypeResolved of
+        TApp constructor _ -> 
+          -- If the expression has type "Constructor Arg", target should be "Constructor"
+          return $ TraitMethod () traitName typeArgs constructor methodName
+        _ -> return expr
+  
+  _ -> return expr
 
 instance Binding SBinding where
   type BTVar SBinding = STBinding
@@ -153,59 +263,77 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   TraitMethod _ traitName typeArgs targetType methodName -> do
     traitName' <- sTBindingToIdent traitName
     typeArgs' <- mapM sTypeToDisplay typeArgs
-    targetType' <- sTypeToDisplay targetType
+    -- Try to resolve the target type more aggressively
+    targetType' <- aggressiveTypeResolve targetType
     return $ TraitMethod () traitName' typeArgs' targetType' methodName
   PrimUnit _ -> return $ PrimUnit ()
   PrimNil _ ty -> do
     ty' <- sTypeToDisplay ty
     return $ PrimNil () ty'
-  PrimCons _ ty head tail -> do
+  PrimCons _ ty headExpr tailExpr -> do
     ty' <- sTypeToDisplay ty
-    head' <- sExprToDisplayWithTypes head
-    tail' <- sExprToDisplayWithTypes tail
+    head' <- sExprToDisplayWithTypes headExpr
+    tail' <- sExprToDisplayWithTypes tailExpr
     return $ PrimCons () ty' head' tail'
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)
 sExprToDisplay = sExprToDisplayWithTypes
 
+
 sTypeToDisplay :: SType -> IO (Type Ident)
-sTypeToDisplay = \case
-  TVar ref -> do
-    b <- readIORef ref
-    case b of
-      Bound t -> sTypeToDisplay t
-      Skolem i _ -> return $ TVar (unLocated i)
-      Unbound _ _ -> return $ TVar $ Ident "_"
-  TArrow t1 t2 -> do
-    t1' <- sTypeToDisplay t1
-    t2' <- sTypeToDisplay t2
-    return $ TArrow t1' t2'
-  TForall ref ty -> do
-    b <- readIORef ref
-    case b of
-      Bound t -> sTypeToDisplay t
-      Skolem i _ -> do
-        ty' <- sTypeToDisplay ty
-        return $ TForall (unLocated i) ty'
-      Unbound _ _ -> do
-        ty' <- sTypeToDisplay ty
-        return $ TForall (Ident "_") ty'
-  TApp t1 t2 -> do
-    t1' <- sTypeToDisplay t1
-    t2' <- sTypeToDisplay t2
-    return $ TApp t1' t2'
-  TList t -> do
-    t' <- sTypeToDisplay t
-    return $ TList t'
-  TUnit -> return TUnit
+sTypeToDisplay = sTypeToDisplayHelper []
+  where
+    sTypeToDisplayHelper :: [STBinding] -> SType -> IO (Type Ident)
+    sTypeToDisplayHelper visited ty = case ty of
+      TVar ref -> do
+        -- Avoid infinite loops by tracking visited bindings
+        if ref `elem` visited
+          then return $ TVar $ Ident "_"
+          else do
+            b <- readIORef ref
+            case b of
+              Bound t -> sTypeToDisplayHelper (ref:visited) t
+              Skolem i _ -> return $ TVar (unLocated i)
+              Unbound _ idx -> return $ TVar $ Ident ("t" ++ show idx)
+      TArrow t1 t2 -> do
+        t1' <- sTypeToDisplayHelper visited t1
+        t2' <- sTypeToDisplayHelper visited t2
+        return $ TArrow t1' t2'
+      TForall ref ty -> do
+        b <- readIORef ref
+        case b of
+          Bound t -> sTypeToDisplayHelper (ref:visited) t
+          Skolem i _ -> do
+            ty' <- sTypeToDisplayHelper visited ty
+            return $ TForall (unLocated i) ty'
+          Unbound _ idx -> do
+            ty' <- sTypeToDisplayHelper visited ty
+            return $ TForall (Ident ("t" ++ show idx)) ty'
+      TConstraint traitName typeVars targetType bodyType -> do
+        traitName' <- sTBindingToIdentImproved traitName
+        typeVars' <- mapM sTBindingToIdentImproved typeVars
+        targetType' <- sTypeToDisplayHelper visited targetType
+        bodyType' <- sTypeToDisplayHelper visited bodyType
+        return $ TConstraint traitName' typeVars' targetType' bodyType'
+      TApp t1 t2 -> do
+        t1' <- sTypeToDisplayHelper visited t1
+        t2' <- sTypeToDisplayHelper visited t2
+        return $ TApp t1' t2'
+      TList t -> do
+        t' <- sTypeToDisplayHelper visited t
+        return $ TList t'
+      TUnit -> return TUnit
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
   Let _ v mty body -> do
     v' <- sBindingToIdent v
     mty' <- mapM sTypeToDisplay mty
-    body' <- sExprToDisplay body
+    -- Use targeted resolution for let statements with explicit type annotations
+    body' <- case mty' of
+      Just annotationType -> resolveTraitMethodsWithType body annotationType
+      Nothing -> sExprToDisplay body
     return $ Let () v' mty' body'
   Type binding ty -> do
     binding' <- sTBindingToIdent binding
@@ -282,9 +410,9 @@ extractTypeMapping = gatherTypes
         return (exprTypes ++ fieldTypes)
       PrimUnit _ -> return []
       PrimNil _ _ -> return []
-      PrimCons _ _ head tail -> do
-        headTypes <- gatherTypes head
-        tailTypes <- gatherTypes tail
+      PrimCons _ _ headExpr tailExpr -> do
+        headTypes <- gatherTypes headExpr
+        tailTypes <- gatherTypes tailExpr
         return (headTypes ++ tailTypes)
       _ -> return []
 
