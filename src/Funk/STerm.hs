@@ -337,9 +337,22 @@ typeOf = \case
   PrimBindIO ty _ _ -> ty
   PrimIntEq ty _ _ -> ty
   PrimStringEq ty _ _ -> ty
+  PrimStringConcat ty _ _ -> ty
   PrimIfThenElse ty _ _ _ -> ty
   PrimIntSub ty _ _ -> ty
   PrimExit ty _ -> ty
+  -- Primitive values (for currying)
+  PrimFmapIOValue ty -> ty
+  PrimPureIOValue ty -> ty
+  PrimApplyIOValue ty -> ty
+  PrimBindIOValue ty -> ty
+  PrimIntEqValue ty -> ty
+  PrimStringEqValue ty -> ty
+  PrimStringConcatValue ty -> ty
+  PrimIfThenElseValue ty -> ty
+  PrimIntSubValue ty -> ty
+  PrimExitValue ty -> ty
+  PrimPrintValue ty -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -422,9 +435,22 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   PrimBindIO _ iox f -> Funk.Term.PrimBindIO () <$> sExprToDisplayWithTypes iox <*> sExprToDisplayWithTypes f
   PrimIntEq _ e1 e2 -> Funk.Term.PrimIntEq () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
   PrimStringEq _ e1 e2 -> Funk.Term.PrimStringEq () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
+  PrimStringConcat _ e1 e2 -> Funk.Term.PrimStringConcat () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
   PrimIfThenElse _ c t e -> Funk.Term.PrimIfThenElse () <$> sExprToDisplayWithTypes c <*> sExprToDisplayWithTypes t <*> sExprToDisplayWithTypes e
   PrimIntSub _ e1 e2 -> Funk.Term.PrimIntSub () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
   PrimExit _ e -> Funk.Term.PrimExit () <$> sExprToDisplayWithTypes e
+  -- Primitive values (for currying)
+  PrimFmapIOValue _ -> return $ Funk.Term.PrimFmapIOValue ()
+  PrimPureIOValue _ -> return $ Funk.Term.PrimPureIOValue ()
+  PrimApplyIOValue _ -> return $ Funk.Term.PrimApplyIOValue ()
+  PrimBindIOValue _ -> return $ Funk.Term.PrimBindIOValue ()
+  PrimIntEqValue _ -> return $ Funk.Term.PrimIntEqValue ()
+  PrimStringEqValue _ -> return $ Funk.Term.PrimStringEqValue ()
+  PrimStringConcatValue _ -> return $ Funk.Term.PrimStringConcatValue ()
+  PrimIfThenElseValue _ -> return $ Funk.Term.PrimIfThenElseValue ()
+  PrimIntSubValue _ -> return $ Funk.Term.PrimIntSubValue ()
+  PrimExitValue _ -> return $ Funk.Term.PrimExitValue ()
+  PrimPrintValue _ -> return $ Funk.Term.PrimPrintValue ()
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)

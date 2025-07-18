@@ -1,4 +1,3 @@
-
 module Funk.Core where
 
 import Text.PrettyPrint hiding ((<>))
@@ -58,9 +57,22 @@ data CoreExpr
   | CoreBindIO CoreExpr CoreExpr         -- Primitive bind for IO
   | CoreIntEq CoreExpr CoreExpr          -- Primitive int equality
   | CoreStringEq CoreExpr CoreExpr       -- Primitive string equality
+  | CoreStringConcat CoreExpr CoreExpr   -- Primitive string concatenation
   | CoreIfThenElse CoreExpr CoreExpr CoreExpr -- Primitive if/then/else
   | CoreIntSub CoreExpr CoreExpr         -- Primitive integer subtraction
   | CoreExit CoreExpr                    -- Exit with code
+  -- Primitive values (for currying)
+  | CoreFmapIOValue                      -- Primitive fmap for IO as value
+  | CorePureIOValue                      -- Primitive pure for IO as value
+  | CoreApplyIOValue                     -- Primitive apply for IO as value
+  | CoreBindIOValue                      -- Primitive bind for IO as value
+  | CoreIntEqValue                       -- Primitive int equality as value
+  | CoreStringEqValue                    -- Primitive string equality as value
+  | CoreStringConcatValue                -- Primitive string concatenation as value
+  | CoreIfThenElseValue                  -- Primitive if/then/else as value
+  | CoreIntSubValue                      -- Primitive integer subtraction as value
+  | CoreExitValue                        -- Exit with code as value
+  | CorePrintValue                       -- Primitive print function as value
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -206,6 +218,11 @@ prettyCoreExpr p (CoreStringEq e1 e2) =
       e2' = prettyCoreExpr (p+1) e2
   in parensIf (p > 0) (text "stringEq" <+> e1' <+> e2')
 
+prettyCoreExpr p (CoreStringConcat e1 e2) =
+  let e1' = prettyCoreExpr (p+1) e1
+      e2' = prettyCoreExpr (p+1) e2
+  in parensIf (p > 0) (text "stringConcat" <+> e1' <+> e2')
+
 prettyCoreExpr p (CoreIfThenElse c t e) =
   let c' = prettyCoreExpr (p+1) c
       t' = prettyCoreExpr (p+1) t
@@ -220,6 +237,19 @@ prettyCoreExpr p (CoreIntSub e1 e2) =
 prettyCoreExpr p (CoreExit e) =
   let e' = prettyCoreExpr (p+1) e
   in parensIf (p > 0) (text "exit" <+> e')
+
+-- Primitive values (for currying)
+prettyCoreExpr _ CoreFmapIOValue = text "fmapIO"
+prettyCoreExpr _ CorePureIOValue = text "pureIO"
+prettyCoreExpr _ CoreApplyIOValue = text "applyIO"
+prettyCoreExpr _ CoreBindIOValue = text "bindIO"
+prettyCoreExpr _ CoreIntEqValue = text "intEq"
+prettyCoreExpr _ CoreStringEqValue = text "stringEq"
+prettyCoreExpr _ CoreStringConcatValue = text "stringConcat"
+prettyCoreExpr _ CoreIfThenElseValue = text "ifThenElse"
+prettyCoreExpr _ CoreIntSubValue = text "intSub"
+prettyCoreExpr _ CoreExitValue = text "exit"
+prettyCoreExpr _ CorePrintValue = text "print"
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =

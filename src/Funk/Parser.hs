@@ -194,69 +194,92 @@ primConsExpr = do
   PrimCons () ty headExpr <$> atomicExpr
 
 primPrintExpr :: Parser PExpr
-primPrintExpr = do
-  tok TokPrint
-  PrimPrint () <$> atomicExpr
+primPrintExpr = 
+  try (do
+    tok TokPrint
+    arg <- atomicExpr
+    return $ PrimPrint () arg
+  ) <|> (tok TokPrint $> PrimPrintValue ())
 
 primFmapIOExpr :: Parser PExpr
-primFmapIOExpr = do
-  tok TokFmapIO
-  f <- atomicExpr
-  io <- atomicExpr
-  return $ PrimFmapIO () f io
+primFmapIOExpr = 
+  try (do
+    tok TokFmapIO
+    f <- atomicExpr
+    io <- atomicExpr
+    return $ PrimFmapIO () f io
+  ) <|> (tok TokFmapIO $> PrimFmapIOValue ())
 
 primPureIOExpr :: Parser PExpr
-primPureIOExpr = do
-  tok TokPureIO
-  PrimPureIO () <$> atomicExpr
+primPureIOExpr = 
+  try (do
+    tok TokPureIO
+    arg <- atomicExpr
+    return $ PrimPureIO () arg
+  ) <|> (tok TokPureIO $> PrimPureIOValue ())
 
 primApplyIOExpr :: Parser PExpr
-primApplyIOExpr = do
-  tok TokApplyIO
-  iof <- atomicExpr
-  iox <- atomicExpr
-  return $ PrimApplyIO () iof iox
+primApplyIOExpr = 
+  try (do
+    tok TokApplyIO
+    iof <- atomicExpr
+    iox <- atomicExpr
+    return $ PrimApplyIO () iof iox
+  ) <|> (tok TokApplyIO $> PrimApplyIOValue ())
 
 primBindIOExpr :: Parser PExpr
-primBindIOExpr = do
-  tok TokBindIO
-  iox <- atomicExpr
-  f <- atomicExpr
-  return $ PrimBindIO () iox f
+primBindIOExpr = 
+  try (do
+    tok TokBindIO
+    iox <- atomicExpr
+    f <- atomicExpr
+    return $ PrimBindIO () iox f
+  ) <|> (tok TokBindIO $> PrimBindIOValue ())
 
 primIntEqExpr :: Parser PExpr
-primIntEqExpr = do
-  tok TokIntEq
-  e1 <- atomicExpr
-  e2 <- atomicExpr
-  return $ PrimIntEq () e1 e2
+primIntEqExpr = 
+  try (do
+    tok TokIntEq
+    e1 <- atomicExpr
+    e2 <- atomicExpr
+    return $ PrimIntEq () e1 e2
+  ) <|> (tok TokIntEq $> PrimIntEqValue ())
 
 primStringEqExpr :: Parser PExpr
-primStringEqExpr = do
-  tok TokStringEq
-  e1 <- atomicExpr
-  e2 <- atomicExpr
-  return $ PrimStringEq () e1 e2
+primStringEqExpr = 
+  try (do
+    tok TokStringEq
+    e1 <- atomicExpr
+    e2 <- atomicExpr
+    return $ PrimStringEq () e1 e2
+  ) <|> (tok TokStringEq $> PrimStringEqValue ())
 
 primIfThenElseExpr :: Parser PExpr
-primIfThenElseExpr = do
-  _ <- tok TokIfThenElse
-  c <- atomicExpr
-  t <- atomicExpr
-  e <- atomicExpr
-  return $ PrimIfThenElse () c t e
+primIfThenElseExpr = 
+  try (do
+    _ <- tok TokIfThenElse
+    c <- atomicExpr
+    t <- atomicExpr
+    e <- atomicExpr
+    return $ PrimIfThenElse () c t e
+  ) <|> (tok TokIfThenElse $> PrimIfThenElseValue ())
 
 primIntSubExpr :: Parser PExpr
-primIntSubExpr = do
-  _ <- tok TokIntSub
-  e1 <- atomicExpr
-  e2 <- atomicExpr
-  return $ PrimIntSub () e1 e2
+primIntSubExpr = 
+  try (do
+    _ <- tok TokIntSub
+    e1 <- atomicExpr
+    e2 <- atomicExpr
+    return $ PrimIntSub () e1 e2
+  ) <|> (tok TokIntSub $> PrimIntSubValue ())
 
 primExitExpr :: Parser PExpr
-primExitExpr = do
-  tok TokExit
-  PrimExit () <$> atomicExpr
+primExitExpr = 
+  try (do
+    tok TokExit
+    arg <- atomicExpr
+    return $ PrimExit () arg
+  ) <|> (tok TokExit $> PrimExitValue ())
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
@@ -513,6 +536,7 @@ expr =
       try primIfThenElseExpr,
       try primIntSubExpr,
       try primStringEqExpr,
+      try primStringConcatExpr,
       try primExitExpr,
       appExpr
     ]
@@ -614,3 +638,12 @@ parseTopLevel = parse (topLevelBlock <* eof) ""
       -- Top level programs contain only statements, no final expression
       -- We add a unit expression as a placeholder to satisfy the Block type
       return $ Block stmts (PrimUnit ())
+
+primStringConcatExpr :: Parser PExpr
+primStringConcatExpr = 
+  try (do
+    tok TokStringConcat
+    e1 <- atomicExpr
+    e2 <- atomicExpr
+    return $ PrimStringConcat () e1 e2
+  ) <|> (tok TokStringConcat $> PrimStringConcatValue ())

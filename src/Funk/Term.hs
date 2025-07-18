@@ -140,9 +140,22 @@ data Expr b
   | PrimBindIO (BVar b) (Expr b) (Expr b)
   | PrimIntEq (BVar b) (Expr b) (Expr b)
   | PrimStringEq (BVar b) (Expr b) (Expr b)
+  | PrimStringConcat (BVar b) (Expr b) (Expr b)
   | PrimIfThenElse (BVar b) (Expr b) (Expr b) (Expr b)
   | PrimIntSub (BVar b) (Expr b) (Expr b)
   | PrimExit (BVar b) (Expr b)
+  -- Primitives as values (for currying)
+  | PrimFmapIOValue (BVar b)
+  | PrimPureIOValue (BVar b)
+  | PrimApplyIOValue (BVar b)
+  | PrimBindIOValue (BVar b)
+  | PrimIntEqValue (BVar b)
+  | PrimStringEqValue (BVar b)
+  | PrimStringConcatValue (BVar b)
+  | PrimIfThenElseValue (BVar b)
+  | PrimIntSubValue (BVar b)
+  | PrimExitValue (BVar b)
+  | PrimPrintValue (BVar b)
 
 data Visibility = Public | Private
   deriving (Show, Eq)
@@ -419,6 +432,11 @@ prettyExpr p (PrimStringEq _ e1 e2) =
       e2' = prettyExpr AtomPrec e2
    in parensIf (p > AppPrec) (text "#stringEq" <+> e1' <+> e2')
 
+prettyExpr p (PrimStringConcat _ e1 e2) =
+  let e1' = prettyExpr AtomPrec e1
+      e2' = prettyExpr AtomPrec e2
+   in parensIf (p > AppPrec) (text "#stringConcat" <+> e1' <+> e2')
+
 prettyExpr p (PrimIfThenElse _ c t e) =
   let c' = prettyExpr AtomPrec c
       t' = prettyExpr AtomPrec t
@@ -433,6 +451,18 @@ prettyExpr p (PrimIntSub _ e1 e2) =
 prettyExpr p (PrimExit _ e) =
   let e' = prettyExpr AtomPrec e
    in parensIf (p > AppPrec) (text "#exit" <+> e')
+-- Primitive values (for currying)
+prettyExpr _ (PrimFmapIOValue _) = text "#fmapIO"
+prettyExpr _ (PrimPureIOValue _) = text "#pureIO"
+prettyExpr _ (PrimApplyIOValue _) = text "#applyIO"
+prettyExpr _ (PrimBindIOValue _) = text "#bindIO"
+prettyExpr _ (PrimIntEqValue _) = text "#intEq"
+prettyExpr _ (PrimStringEqValue _) = text "#stringEq"
+prettyExpr _ (PrimStringConcatValue _) = text "#stringConcat"
+prettyExpr _ (PrimIfThenElseValue _) = text "#ifThenElse"
+prettyExpr _ (PrimIntSubValue _) = text "#intSub"
+prettyExpr _ (PrimExitValue _) = text "#exit"
+prettyExpr _ (PrimPrintValue _) = text "#print"
 
 data Block b = Block [Stmt b] (Expr b)
 
@@ -553,6 +583,11 @@ prettyExprWithTypes typeMap p (PrimStringEq _ e1 e2) =
       e2' = prettyExprWithTypes typeMap AtomPrec e2
    in parensIf (p > AppPrec) (text "#stringEq" <+> e1' <+> e2')
 
+prettyExprWithTypes typeMap p (PrimStringConcat _ e1 e2) =
+  let e1' = prettyExprWithTypes typeMap AtomPrec e1
+      e2' = prettyExprWithTypes typeMap AtomPrec e2
+   in parensIf (p > AppPrec) (text "#stringConcat" <+> e1' <+> e2')
+
 prettyExprWithTypes typeMap p (PrimIfThenElse _ c t e) =
   let c' = prettyExprWithTypes typeMap AtomPrec c
       t' = prettyExprWithTypes typeMap AtomPrec t
@@ -567,6 +602,18 @@ prettyExprWithTypes typeMap p (PrimIntSub _ e1 e2) =
 prettyExprWithTypes typeMap p (PrimExit _ e) =
   let e' = prettyExprWithTypes typeMap AtomPrec e
    in parensIf (p > AppPrec) (text "#exit" <+> e')
+-- Primitive values (for currying)
+prettyExprWithTypes _ _ (PrimFmapIOValue _) = text "#fmapIO"
+prettyExprWithTypes _ _ (PrimPureIOValue _) = text "#pureIO"
+prettyExprWithTypes _ _ (PrimApplyIOValue _) = text "#applyIO"
+prettyExprWithTypes _ _ (PrimBindIOValue _) = text "#bindIO"
+prettyExprWithTypes _ _ (PrimIntEqValue _) = text "#intEq"
+prettyExprWithTypes _ _ (PrimStringEqValue _) = text "#stringEq"
+prettyExprWithTypes _ _ (PrimStringConcatValue _) = text "#stringConcat"
+prettyExprWithTypes _ _ (PrimIfThenElseValue _) = text "#ifThenElse"
+prettyExprWithTypes _ _ (PrimIntSubValue _) = text "#intSub"
+prettyExprWithTypes _ _ (PrimExitValue _) = text "#exit"
+prettyExprWithTypes _ _ (PrimPrintValue _) = text "#print"
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =

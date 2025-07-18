@@ -240,6 +240,24 @@ compileResolvedExpr = \case
     coreE <- compileResolvedExpr e
     return $ CoreExit coreE
 
+  Term.PrimStringConcat _ e1 e2 -> do
+    coreE1 <- compileResolvedExpr e1
+    coreE2 <- compileResolvedExpr e2
+    return $ CoreStringConcat coreE1 coreE2
+
+  -- Primitive values (for currying)
+  Term.PrimFmapIOValue _ -> return CoreFmapIOValue
+  Term.PrimPureIOValue _ -> return CorePureIOValue
+  Term.PrimApplyIOValue _ -> return CoreApplyIOValue
+  Term.PrimBindIOValue _ -> return CoreBindIOValue
+  Term.PrimIntEqValue _ -> return CoreIntEqValue
+  Term.PrimStringEqValue _ -> return CoreStringEqValue
+  Term.PrimStringConcatValue _ -> return CoreStringConcatValue
+  Term.PrimIfThenElseValue _ -> return CoreIfThenElseValue
+  Term.PrimIntSubValue _ -> return CoreIntSubValue
+  Term.PrimExitValue _ -> return CoreExitValue
+  Term.PrimPrintValue _ -> return CorePrintValue
+
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr
 compileBlock sblock = do

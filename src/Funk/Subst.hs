@@ -259,6 +259,45 @@ substExpr pexpr = case pexpr of
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     e' <- substExpr e
     return $ PrimExit iTy e'
+  PrimStringConcat _ e1 e2 -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    e1' <- substExpr e1
+    e2' <- substExpr e2
+    return $ PrimStringConcat iTy e1' e2'
+  -- Primitive values (for currying)
+  PrimFmapIOValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimFmapIOValue iTy
+  PrimPureIOValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimPureIOValue iTy
+  PrimApplyIOValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimApplyIOValue iTy
+  PrimBindIOValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimBindIOValue iTy
+  PrimIntEqValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimIntEqValue iTy
+  PrimStringEqValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimStringEqValue iTy
+  PrimStringConcatValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimStringConcatValue iTy
+  PrimIfThenElseValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimIfThenElseValue iTy
+  PrimIntSubValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimIntSubValue iTy
+  PrimExitValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimExitValue iTy
+  PrimPrintValue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimPrintValue iTy
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"

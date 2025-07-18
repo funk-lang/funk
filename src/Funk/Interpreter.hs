@@ -246,8 +246,12 @@ eval = \case
   CoreIfThenElse c t e -> do
     v <- eval c
     case v of
-      VCon "True" [] -> eval t
-      VCon "False" [] -> eval e
+      VCon "True" [] -> do
+        vt <- eval t
+        applyFunction vt (VCon "Unit" [])
+      VCon "False" [] -> do
+        ve <- eval e
+        applyFunction ve (VCon "Unit" [])
       _ -> throwError "Type error: if condition must be a boolean"
 
   CoreIntSub e1 e2 -> do
@@ -263,6 +267,26 @@ eval = \case
       VInt code -> return $ VIO $ do
         exitWith (if code == 0 then ExitSuccess else ExitFailure code)
       _ -> throwError "Type error: exit expects an integer"
+
+  CoreStringConcat e1 e2 -> do
+    v1 <- eval e1
+    v2 <- eval e2
+    case (v1, v2) of
+      (VString s1, VString s2) -> return $ VString (s1 ++ s2)
+      _ -> throwError "Type error: stringConcat expects two strings"
+
+  -- Primitive values (for currying) - simple lambda approach
+  CoreFmapIOValue -> return $ VLam (Var "f") TyUnit (CoreLam (Var "io") TyUnit (CoreFmapIO (CoreVar (Var "f")) (CoreVar (Var "io"))), Map.empty)
+  CorePureIOValue -> return $ VLam (Var "x") TyUnit (CorePureIO (CoreVar (Var "x")), Map.empty)
+  CoreApplyIOValue -> return $ VLam (Var "iof") TyUnit (CoreLam (Var "iox") TyUnit (CoreApplyIO (CoreVar (Var "iof")) (CoreVar (Var "iox"))), Map.empty)
+  CoreBindIOValue -> return $ VLam (Var "iox") TyUnit (CoreLam (Var "f") TyUnit (CoreBindIO (CoreVar (Var "iox")) (CoreVar (Var "f"))), Map.empty)
+  CoreIntEqValue -> return $ VLam (Var "x") TyUnit (CoreLam (Var "y") TyUnit (CoreIntEq (CoreVar (Var "x")) (CoreVar (Var "y"))), Map.empty)
+  CoreStringEqValue -> return $ VLam (Var "x") TyUnit (CoreLam (Var "y") TyUnit (CoreStringEq (CoreVar (Var "x")) (CoreVar (Var "y"))), Map.empty)
+  CoreStringConcatValue -> return $ VLam (Var "x") TyUnit (CoreLam (Var "y") TyUnit (CoreStringConcat (CoreVar (Var "x")) (CoreVar (Var "y"))), Map.empty)
+  CoreIfThenElseValue -> return $ VLam (Var "c") TyUnit (CoreLam (Var "t") TyUnit (CoreLam (Var "e") TyUnit (CoreIfThenElse (CoreVar (Var "c")) (CoreVar (Var "t")) (CoreVar (Var "e")))), Map.empty)
+  CoreIntSubValue -> return $ VLam (Var "x") TyUnit (CoreLam (Var "y") TyUnit (CoreIntSub (CoreVar (Var "x")) (CoreVar (Var "y"))), Map.empty)
+  CoreExitValue -> return $ VLam (Var "code") TyUnit (CoreExit (CoreVar (Var "code")), Map.empty)
+  CorePrintValue -> return $ VLam (Var "str") TyUnit (CorePrint (CoreVar (Var "str")), Map.empty)
 
 applyFunction :: Value -> Value -> Interp Value
 applyFunction funcVal argVal = case funcVal of

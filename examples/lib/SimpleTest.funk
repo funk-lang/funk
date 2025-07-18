@@ -1,35 +1,45 @@
-let assertEqual = \expected actual name -> 
+let assertEqual = \expected actual name -> {
+  let passed = #stringEq expected actual;
+  let message = #ifThenElse passed (\_ -> "PASS") (\_ -> "FAIL");
   #bindIO (print name) (\_ ->
-    #bindIO (print (#ifThenElse (#stringEq expected actual) "PASS" "FAIL")) (\_ ->
-      #ifThenElse (#stringEq expected actual) 
-        (#pureIO #Unit)
-        (#exit 1)
+    #bindIO (print message) (\_ ->
+      #ifThenElse passed 
+        (\_ -> #pureIO #Unit)
+        (\_ -> #exit 1)
     )
-  );
+  )
+};
 
-let assertEqualInt = \expected actual name -> 
+let assertEqualInt = \expected actual name -> {
+  let passed = #intEq expected actual;
+  let message = #ifThenElse passed (\_ -> "PASS") (\_ -> "FAIL");
   #bindIO (print name) (\_ ->
-    #bindIO (print (#ifThenElse (#intEq expected actual) "PASS" "FAIL")) (\_ ->
-      #ifThenElse (#intEq expected actual) 
-        (#pureIO #Unit)
-        (#exit 1)
+    #bindIO (print message) (\_ ->
+      #ifThenElse passed 
+        (\_ -> #pureIO #Unit)
+        (\_ -> #exit 1)
     )
-  );
+  )
+};
 
-let assertTrue = \condition name -> 
+let assertTrue = \condition name -> {
+  let message = #ifThenElse condition (\_ -> "PASS") (\_ -> "FAIL");
   #bindIO (print name) (\_ ->
-    #bindIO (print (#ifThenElse condition "PASS" "FAIL")) (\_ ->
+    #bindIO (print message) (\_ ->
       #ifThenElse condition 
-        (#pureIO #Unit)
-        (#exit 1)
+        (\_ -> #pureIO #Unit)
+        (\_ -> #exit 1)
     )
-  );
+  )
+};
 
-let assertFalse = \condition name -> 
+let assertFalse = \condition name -> {
+  let message = #ifThenElse condition (\_ -> "FAIL") (\_ -> "PASS");
   #bindIO (print name) (\_ ->
-    #bindIO (print (#ifThenElse condition "FAIL" "PASS")) (\_ ->
+    #bindIO (print message) (\_ ->
       #ifThenElse condition 
-        (#exit 1)
-        (#pureIO #Unit)
+        (\_ -> #exit 1)
+        (\_ -> #pureIO #Unit)
     )
-  );
+  )
+};

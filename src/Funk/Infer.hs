@@ -218,13 +218,15 @@ constraintsExpr = \case
              ] ++ cs1 ++ cs2
 
   PrimIfThenElse ty c t e -> do
-    -- #if c then t else e has type a, where c has type #Bool and t and e have type a
+    -- #if c then t else e has type a, where c has type #Bool and t and e have type (#Unit -> a)
     csC <- constraintsExpr c
     csT <- constraintsExpr t
     csE <- constraintsExpr e
+    freshTy <- freshUnboundTy (Pos.newPos "" 1 1)
     return $ [ CEq (TVar (typeOf c)) TBool,
-               CEq (TVar (typeOf t)) (TVar (typeOf e)),
-               CEq (TVar ty) (TVar (typeOf t))
+               CEq (TVar (typeOf t)) (TArrow TUnit (TVar freshTy)),
+               CEq (TVar (typeOf e)) (TArrow TUnit (TVar freshTy)),
+               CEq (TVar ty) (TVar freshTy)
              ] ++ csC ++ csT ++ csE
 
   PrimIntSub ty e1 e2 -> do
@@ -242,6 +244,68 @@ constraintsExpr = \case
     return $ [ CEq (TVar ty) (TIO TUnit),
                CEq (TVar (typeOf e)) TInt
              ] ++ csE
+
+  PrimStringConcat ty e1 e2 -> do
+    -- #stringConcat e1 e2 has type #String, where e1 and e2 have type #String
+    cs1 <- constraintsExpr e1
+    cs2 <- constraintsExpr e2
+    return $ [ CEq (TVar ty) TString,
+               CEq (TVar (typeOf e1)) TString,
+               CEq (TVar (typeOf e2)) TString
+             ] ++ cs1 ++ cs2
+
+  -- Primitive values (for currying) - these need proper function types
+  PrimFmapIOValue ty -> do
+    -- #fmapIO has type (a -> b) -> IO a -> IO b
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ [ CEq (TVar ty) (TArrow (TArrow (TVar aType) (TVar bType)) (TArrow (TIO (TVar aType)) (TIO (TVar bType)))) ]
+  
+  PrimPureIOValue ty -> do
+    -- #pureIO has type a -> IO a
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ [ CEq (TVar ty) (TArrow (TVar aType) (TIO (TVar aType))) ]
+  
+  PrimApplyIOValue ty -> do
+    -- #applyIO has type IO (a -> b) -> IO a -> IO b
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ [ CEq (TVar ty) (TArrow (TIO (TArrow (TVar aType) (TVar bType))) (TArrow (TIO (TVar aType)) (TIO (TVar bType)))) ]
+  
+  PrimBindIOValue ty -> do
+    -- #bindIO has type IO a -> (a -> IO b) -> IO b
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ [ CEq (TVar ty) (TArrow (TIO (TVar aType)) (TArrow (TArrow (TVar aType) (TIO (TVar bType))) (TIO (TVar bType)))) ]
+  
+  PrimIntEqValue ty -> do
+    -- #intEq has type Int -> Int -> Bool
+    return $ [ CEq (TVar ty) (TArrow TInt (TArrow TInt TBool)) ]
+  
+  PrimStringEqValue ty -> do
+    -- #stringEq has type String -> String -> Bool
+    return $ [ CEq (TVar ty) (TArrow TString (TArrow TString TBool)) ]
+  
+  PrimStringConcatValue ty -> do
+    -- #stringConcat has type String -> String -> String
+    return $ [ CEq (TVar ty) (TArrow TString (TArrow TString TString)) ]
+  
+  PrimIfThenElseValue ty -> do
+    -- #ifThenElse has type Bool -> (() -> a) -> (() -> a) -> a
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ [ CEq (TVar ty) (TArrow TBool (TArrow (TArrow TUnit (TVar aType)) (TArrow (TArrow TUnit (TVar aType)) (TVar aType)))) ]
+  
+  PrimIntSubValue ty -> do
+    -- #intSub has type Int -> Int -> Int
+    return $ [ CEq (TVar ty) (TArrow TInt (TArrow TInt TInt)) ]
+  
+  PrimExitValue ty -> do
+    -- #exit has type Int -> IO ()
+    return $ [ CEq (TVar ty) (TArrow TInt (TIO TUnit)) ]
+  
+  PrimPrintValue ty -> do
+    -- #print has type String -> IO ()
+    return $ [ CEq (TVar ty) (TArrow TString (TIO TUnit)) ]
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do

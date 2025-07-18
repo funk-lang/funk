@@ -16,26 +16,23 @@ trait Monad (m :: * -> *) {
 }
 
 instance Functor forall a . IO = {
-  fmap = \f ioVal -> ioVal
+  fmap = #fmapIO
 }
 
 instance Applicative forall a . IO = {
-  apply = \ioF ioX -> ioX
+  apply = #applyIO
 }
 
 instance Monad forall a . IO = {
-  return = \x -> #pureIO x,
-  bind = \ioX f -> #bindIO ioX f
+  return = #pureIO,
+  bind = #bindIO
 }
 
 let wrapIO = \x -> IO { unIO = x };
 let print = \x -> #print x;
 let testIO = IO { unIO = "Hello from IO!" };
 let identity = \x -> x;
-let mappedIO = fmap identity testIO;
-let bindIO = bind testIO identity;
 let printTest = print "Hello from IO print wrapper!";
 let printTest2 = print "Testing multiple IO actions!";
-let mappedPrint = fmap (\s -> s) (print "Mapped IO action!");
 
-let replicateM_ = \n action -> #ifThenElse (#intEq n 0) (#pureIO #Unit) (#bindIO action (\_ -> replicateM_ (#intSub n 1) action));
+let replicateM_ = \n action -> #ifThenElse (#intEq n 0) (\_ -> #pureIO #Unit) (\_ -> #bindIO action (\_ -> replicateM_ (#intSub n 1) action));
