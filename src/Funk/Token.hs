@@ -47,6 +47,9 @@ data Token
   | TokAt
   | TokComma
   | TokLet
+  | TokMod
+  | TokPub  
+  | TokUse
   | TokList
   | TokUnit
   | TokStringType
@@ -94,6 +97,9 @@ instance Show Token where
     TokAt -> "'@'"
     TokComma -> ","
     TokLet -> "'let'"
+    TokMod -> "'mod'"
+    TokPub -> "'pub'"
+    TokUse -> "'use'"
     TokList -> "'#List'"
     TokUnit -> "'#Unit'"
     TokStringType -> "'#String'"
@@ -169,6 +175,9 @@ token = do
         "instance" -> TokInstance
         "for" -> TokFor
         "let" -> TokLet
+        "mod" -> TokMod
+        "pub" -> TokPub
+        "use" -> TokUse
         "#List" -> TokList
         "#Unit" -> TokUnit
         "#String" -> TokStringType

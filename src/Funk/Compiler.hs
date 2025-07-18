@@ -106,6 +106,11 @@ compileResolvedExpr = \case
     var <- identToVar ident
     return $ CoreVar var
   
+  Term.QualifiedVar _ _modPath ident -> do
+    -- For now, treat qualified vars as regular vars (full module resolution TBD)
+    var <- identToVar ident
+    return $ CoreVar var
+  
   Term.Lam _ ident mty body -> do
     var <- identToVar ident
     
@@ -278,6 +283,48 @@ compileResolvedStmt stmt rest = case stmt of
   Term.Impl _binding _vars _ty _methods -> do
     -- Instance implementations would generate dictionary definitions
     -- For now, we skip them
+    return rest
+  
+  Term.PubLet _ ident _mty body -> do
+    -- Same as Let but with pub visibility
+    var <- identToVar ident
+    coreBody <- compileResolvedExpr body
+    return $ CoreLet var coreBody rest
+  
+  Term.PubType _binding _ty -> 
+    -- Public type aliases don't generate runtime code
+    return rest
+  
+  Term.PubData _binding _fields -> do
+    -- Public data declarations
+    return rest
+  
+  Term.PubDataForall _binding _vars _fields -> do
+    -- Public polymorphic data declarations
+    return rest
+  
+  Term.PubTrait _binding _vars _methods -> do
+    -- Public trait declarations
+    return rest
+  
+  Term.PubTraitWithKinds _binding _vars _methods -> do
+    -- Public trait declarations with kinds
+    return rest
+  
+  Term.Use _modPath _names -> do
+    -- Import statements don't generate runtime code
+    return rest
+  
+  Term.UseAll _modPath -> do
+    -- Import all statements don't generate runtime code
+    return rest
+  
+  Term.PubUse _modPath _names -> do
+    -- Public re-export statements don't generate runtime code
+    return rest
+  
+  Term.PubUseAll _modPath -> do
+    -- Public re-export all statements don't generate runtime code
     return rest
 
 -- | Extract data type definitions from statements

@@ -1,0 +1,3 @@
+use IO.*;
+
+let main = replicateM_ 3 (print "Hello from replicateM_!");

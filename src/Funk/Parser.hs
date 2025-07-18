@@ -138,7 +138,16 @@ kindExpr :: Parser PKind
 kindExpr = chainr1 atomicKind (tok TokArrow $> KArrow)
 
 varExpr :: Parser PExpr
-varExpr = Var () . PBinding . fmap Ident <$> identTok
+varExpr = do
+  firstIdent <- identTok
+  rest <- many (tok TokDot *> identTok)
+  case rest of
+    [] -> return $ Var () (PBinding (fmap Ident firstIdent))
+    _ -> let allIdents = firstIdent : rest
+             modPathParts = map (Ident . unLocated) (init allIdents)
+             varName = PBinding (fmap Ident (last allIdents))
+             modPath = ModulePath modPathParts
+         in return $ QualifiedVar () modPath varName
 
 primUnitExpr :: Parser PExpr
 primUnitExpr = tok TokUnit $> PrimUnit ()
@@ -270,22 +279,6 @@ lambdaExpr = do
             Lam pos v ty <$> expr
         )
 
-recordCreationExprDebug :: Parser PExpr
-recordCreationExprDebug = do
-  constructorName <- fmap Ident <$> identTok <?> "constructor name"
-  tok TokLBrace <?> "opening brace"
-  fields <-
-    sepBy
-      ( do
-          field <- fmap Ident <$> identTok <?> "field name"
-          tok TokColon <?> "colon after field name"
-          e <- expr <?> "field value"
-          return (unLocated field, e)
-      )
-      (tok TokComma <?> "comma between fields")
-  tok TokRBrace <?> "closing brace"
-  return $ RecordCreation () (Var () (PBinding constructorName)) fields
-
 atomicExpr :: Parser PExpr
 atomicExpr =
   choice
@@ -338,6 +331,16 @@ letStmt = do
   body <- expr <* tok TokSemicolon
   return $ Let () v ty body
 
+pubLetStmt :: Parser PStmt
+pubLetStmt = do
+  tok TokPub
+  tok TokLet
+  v <- fmap (PBinding . fmap Ident) identTok
+  ty <- optionMaybe (tok TokColon *> typeExpr)
+  tok TokEq
+  body <- expr <* tok TokSemicolon
+  return $ PubLet () v ty body
+
 typeStmt :: Parser PStmt
 typeStmt = do
   tok TokType
@@ -346,8 +349,17 @@ typeStmt = do
   ty <- typeExpr <* tok TokSemicolon
   return $ Type v ty
 
+pubTypeStmt :: Parser PStmt
+pubTypeStmt = do
+  tok TokPub
+  tok TokType
+  v <- fmap Ident <$> identTok
+  tok TokEq
+  ty <- typeExpr <* tok TokSemicolon
+  return $ PubType v ty
+
 stmt :: Parser PStmt
-stmt = choice [try letStmt, try typeStmt, try dataStmt, try traitStmt, try implStmt]
+stmt = choice [try pubLetStmt, try letStmt, try pubTypeStmt, try typeStmt, try pubDataStmt, try dataStmt, try pubTraitStmt, try traitStmt, try implStmt, try useStmt, try pubUseStmt]
 
 -- Updated dataStmt to handle forall syntax
 dataStmt :: Parser PStmt
@@ -490,6 +502,95 @@ expr =
       try primIntSubExpr,
       appExpr
     ]
+
+-- Helper parser for module paths like "Foo.Bar.Baz"  
+modulePath :: Parser ModulePath
+modulePath = do
+  first <- fmap (Ident . unLocated) identTok
+  rest <- many (try (tok TokDot *> lookAhead identTok) *> tok TokDot *> fmap (Ident . unLocated) identTok)
+  return $ ModulePath (first : rest)
+
+-- Parser for pub data statements
+pubDataStmt :: Parser PStmt
+pubDataStmt = do
+  tok TokPub
+  tok TokData
+  v <- fmap Ident <$> identTok
+  typeParams <- many (fmap Ident <$> identTok)
+  tok TokEq
+  tok TokLBrace
+  fields <-
+    sepBy
+      ( do
+          field <- fmap Ident <$> identTok
+          tok TokColon
+          ty <- typeExpr
+          return (unLocated field, ty)
+      )
+      (tok TokComma)
+  tok TokRBrace
+  if null typeParams
+    then return $ PubData v fields
+    else return $ PubDataForall v typeParams fields
+
+-- Parser for pub trait statements  
+pubTraitStmt :: Parser PStmt
+pubTraitStmt = do
+  tok TokPub
+  tok TokTrait
+  v <- fmap Ident <$> identTok
+  vars <- many (do
+    tok TokLParen
+    var <- fmap Ident <$> identTok
+    tok TokDoubleColon
+    kind <- kindExpr
+    tok TokRParen
+    return (var, Just kind))
+  tok TokLBrace
+  methods <-
+    sepBy
+      ( do
+          method <- fmap Ident <$> identTok
+          tok TokColon
+          ty <- typeExpr
+          return (unLocated method, ty)
+      )
+      (tok TokComma)
+  tok TokRBrace
+  if null vars
+    then return $ PubTrait v [] methods
+    else return $ PubTraitWithKinds v vars methods
+
+-- Parser for use statements
+useStmt :: Parser PStmt
+useStmt = do
+  tok TokUse
+  modPath <- modulePath
+  items <- choice [
+    tok TokDot *> tok TokStar $> [],  -- use Module.*
+    tok TokLBrace *> sepBy (fmap (Ident . unLocated) identTok) (tok TokComma) <* tok TokRBrace,  -- use Module { item1, item2 }
+    return []  -- use Module (import all)
+    ]
+  tok TokSemicolon
+  if null items
+    then return $ UseAll modPath
+    else return $ Use modPath items
+
+-- Parser for pub use statements
+pubUseStmt :: Parser PStmt  
+pubUseStmt = do
+  tok TokPub
+  tok TokUse
+  modPath <- modulePath
+  items <- choice [
+    tok TokDot *> tok TokStar $> [],  -- pub use Module.*
+    tok TokLBrace *> sepBy (fmap (Ident . unLocated) identTok) (tok TokComma) <* tok TokRBrace,  -- pub use Module { item1, item2 }
+    return []  -- pub use Module (import all)
+    ]
+  tok TokSemicolon
+  if null items
+    then return $ PubUseAll modPath
+    else return $ PubUse modPath items
 
 parseTopLevel :: [Located Token] -> Either ParseError PBlock
 parseTopLevel = parse (topLevelBlock <* eof) ""

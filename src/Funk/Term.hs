@@ -118,6 +118,7 @@ instance Binding Ident where
 
 data Expr b
   = Var (BVar b) b
+  | QualifiedVar (BVar b) ModulePath b  -- Module.Path.variable
   | Lam (BLam b) b (Maybe (Type (BTVar b))) (Expr b)
   | App (BApp b) (Expr b) (Expr b)
   | TyApp (BTyApp b) (Expr b) (Type (BTVar b))
@@ -141,14 +142,30 @@ data Expr b
   | PrimIfThenElse (BVar b) (Expr b) (Expr b) (Expr b)
   | PrimIntSub (BVar b) (Expr b) (Expr b)
 
+data Visibility = Public | Private
+  deriving (Show, Eq)
+
+data ModulePath = ModulePath [Ident]
+  deriving (Show, Eq)
+
 data Stmt b
   = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
+  | PubLet (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
   | Type (BTVar b) (Type (BTVar b))
+  | PubType (BTVar b) (Type (BTVar b))
   | Data (BTVar b) [(Ident, Type (BTVar b))]
+  | PubData (BTVar b) [(Ident, Type (BTVar b))]
   | DataForall (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
+  | PubDataForall (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
   | Trait (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
+  | PubTrait (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
   | TraitWithKinds (BTVar b) [(BTVar b, Maybe (Kind (BTVar b)))] [(Ident, Type (BTVar b))]
+  | PubTraitWithKinds (BTVar b) [(BTVar b, Maybe (Kind (BTVar b)))] [(Ident, Type (BTVar b))]
   | Impl (BTVar b) [BTVar b] (Type (BTVar b)) [(Ident, Expr b)]
+  | Use ModulePath [Ident]  -- use Module.Path { item1, item2, ... }
+  | PubUse ModulePath [Ident]  -- pub use Module.Path { item1, item2, ... }
+  | UseAll ModulePath  -- use Module.Path.*
+  | PubUseAll ModulePath  -- pub use Module.Path.*
 
 prettyStmt :: (Show b, Show (BTVar b)) => Stmt b -> Doc
 prettyStmt (Let _ b mty body) =
@@ -188,6 +205,55 @@ prettyStmt (Impl b vars ty methods) =
       tyDoc = prettyType AtomPrec ty
       methodsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExpr AtomPrec e) methods
    in text "instance" <+> bStr <+> varsDoc <+> text "for" <+> tyDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmt (PubLet _ b mty body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExpr AtomPrec body
+      tyDoc = case mty of
+        Just t -> text " :" <+> prettyType AtomPrec t
+        Nothing -> empty
+      letDoc = text "pub let" <+> (bStr <> tyDoc) <+> text "=" <+> bodyDoc
+   in letDoc <> semi
+prettyStmt (PubType b t) =
+  (text "pub type" <+> text (show b) <+> text "=" <+> prettyType AtomPrec t) <> semi
+prettyStmt (PubData b fields) =
+  let bStr = text $ show b
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "pub data" <+> bStr <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmt (PubDataForall b vars fields) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "pub data" <+> bStr <+> text "=" <+> text "forall" <+> varsDoc <+> text "." <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmt (PubTrait b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "pub trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmt (PubTraitWithKinds b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (\(v, mk) -> case mk of
+        Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+        Nothing -> text (show v)) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "pub trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmt (Use modPath items) =
+  let pathDoc = prettyModulePath modPath
+      itemsDoc = braces (hsep (punctuate (text ",") (map (text . unIdent) items)))
+   in (text "use" <+> pathDoc <+> itemsDoc) <> semi
+prettyStmt (PubUse modPath items) =
+  let pathDoc = prettyModulePath modPath
+      itemsDoc = braces (hsep (punctuate (text ",") (map (text . unIdent) items)))
+   in (text "pub use" <+> pathDoc <+> itemsDoc) <> semi
+prettyStmt (UseAll modPath) =
+  let pathDoc = prettyModulePath modPath
+   in (text "use" <+> (pathDoc <> text ".*")) <> semi
+prettyStmt (PubUseAll modPath) =
+  let pathDoc = prettyModulePath modPath
+   in (text "pub use" <+> (pathDoc <> text ".*")) <> semi
+
+prettyModulePath :: ModulePath -> Doc
+prettyModulePath (ModulePath parts) = 
+  hcat $ punctuate (text ".") (map (text . unIdent) parts)
 
 prettyStmtWithTypes :: (Show b, Show (BTVar b), Eq b) => [(b, Type (BTVar b))] -> Stmt b -> Doc
 prettyStmtWithTypes typeMap (Let _ b mty body) =
@@ -229,9 +295,49 @@ prettyStmtWithTypes typeMap (Impl b vars ty methods) =
       tyDoc = prettyType AtomPrec ty
       methodsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprWithTypes typeMap AtomPrec e) methods
    in text "instance" <+> bStr <+> varsDoc <+> text "for" <+> tyDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmtWithTypes typeMap (PubLet _ b mty body) =
+  let bStr = text $ show b
+      bodyDoc = prettyExprWithTypes typeMap AtomPrec body
+      tyDoc = case mty of
+        Just t -> text " :" <+> prettyType AtomPrec t
+        Nothing -> case lookup b typeMap of
+          Just t -> text " :" <+> prettyType AtomPrec t
+          Nothing -> empty
+      letDoc = text "pub let" <+> (bStr <> tyDoc) <+> text "=" <+> bodyDoc
+   in letDoc <> semi
+prettyStmtWithTypes _ (PubType b t) =
+  (text "pub type" <+> text (show b) <+> text "=" <+> prettyType AtomPrec t) <> semi
+prettyStmtWithTypes _ (PubData b fields) =
+  let bStr = text $ show b
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "pub data" <+> bStr <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmtWithTypes _ (PubDataForall b vars fields) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
+   in text "pub data" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") fieldsDoc))
+prettyStmtWithTypes _ (PubTrait b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "pub trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmtWithTypes _ (PubTraitWithKinds b vars methods) =
+  let bStr = text $ show b
+      varsDoc = hsep (punctuate (text ",") (map (text . show . fst) vars))
+      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
+   in text "pub trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
+prettyStmtWithTypes _ (Use modPath names) =
+  (text "use" <+> prettyModulePath modPath <+> braces (hsep (punctuate (text ",") (map (text . unIdent) names)))) <> semi
+prettyStmtWithTypes _ (UseAll modPath) =
+  (text "use" <+> prettyModulePath modPath) <> text ".*" <> semi
+prettyStmtWithTypes _ (PubUse modPath names) =
+  (text "pub use" <+> prettyModulePath modPath <+> braces (hsep (punctuate (text ",") (map (text . unIdent) names)))) <> semi
+prettyStmtWithTypes _ (PubUseAll modPath) =
+  (text "pub use" <+> prettyModulePath modPath) <> text ".*" <> semi
 
 prettyExpr :: (Show (BTVar b), Show b) => Precedence -> Expr b -> Doc
 prettyExpr _ (Var _ b) = text $ show b
+prettyExpr _ (QualifiedVar _ modPath b) = prettyModulePath modPath <> text "." <> text (show b)
 prettyExpr p (Lam _ b mty body) =
   let (params, innerBody) = collectLambdas (Lam undefined b mty body)
       paramDocs = map (\(var, ty) -> case ty of
@@ -319,6 +425,17 @@ prettyExpr p (PrimIntSub _ e1 e2) =
 
 data Block b = Block [Stmt b] (Expr b)
 
+data Module b = Module
+  { moduleName :: ModulePath
+  , moduleStmts :: [Stmt b]
+  , moduleMain :: Maybe (Expr b)
+  }
+
+data Program b = Program
+  { programModules :: [Module b]
+  , programMain :: Module b  -- The main module (entry point)
+  }
+
 prettyBlock :: (Show (BTVar b), Show b) => Block b -> Doc
 prettyBlock (Block stmts expr) =
   let stmtsDoc = vcat $ map prettyStmt stmts
@@ -342,6 +459,10 @@ prettyExprWithTypes typeMap _ (Var _ b) =
   case lookup b typeMap of
     Just ty -> parens (text (show b) <+> text ":" <+> prettyType AtomPrec ty)
     Nothing -> text $ show b
+prettyExprWithTypes typeMap _ (QualifiedVar _ modPath b) =
+  case lookup b typeMap of
+    Just ty -> parens ((prettyModulePath modPath <> text "." <> text (show b)) <+> text ":" <+> prettyType AtomPrec ty)
+    Nothing -> prettyModulePath modPath <> text "." <> text (show b)
 prettyExprWithTypes typeMap p (Lam _ b mty body) =
   let (params, innerBody) = collectLambdas (Lam undefined b mty body)
       paramDocs = map (\(var, ty) -> case ty of

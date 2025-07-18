@@ -127,6 +127,9 @@ substExpr pexpr = case pexpr of
           Just ty -> return ty
           Nothing -> throwError [i]
         return $ Var typeBinding termBinding
+  QualifiedVar _ _modPath (PBinding _i) -> do
+    -- For now, treat qualified variables as errors since module resolution isn't implemented
+    error "QualifiedVar not yet implemented in substitution"
   Lam pos (PBinding i) mty body -> do
     i' <- liftIO $ newIORef (VUnbound i)
     iTy <- freshUnboundTy pos
@@ -322,6 +325,68 @@ substStmt (Impl i vars ty methods) = do
   let implStmt' = Impl ref vars' sty smethods
   modify $ \env -> env {envImpls = (ref, vars', sty, implStmt') : envImpls env}
   return implStmt'
+substStmt (PubLet () (PBinding i) mty body) = do
+  i' <- liftIO $ newIORef (VUnbound i)
+  iTy <- freshUnboundTy (locatedPos i)
+  modify $ \env ->
+    env
+      { envVars = Map.insert (unLocated i) (SBinding i') (envVars env),
+        envVarTypes = Map.insert (unLocated i) iTy (envVarTypes env)
+      }
+  tyAnn <- case mty of
+    Just ty -> Just <$> substTy ty
+    Nothing -> return Nothing
+  body' <- substExpr body
+  return $ PubLet iTy (SBinding i') tyAnn body'
+substStmt (PubType i pty) = do
+  sty <- substTy pty
+  ref <- freshSkolem i
+  return $ PubType ref sty
+substStmt (PubData i fields) = do
+  sfields <- forM fields $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  return $ PubData ref sfields
+substStmt (PubDataForall i vars fields) = do
+  vars' <- mapM freshSkolem vars
+  sfields <- forM fields $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  return $ PubDataForall ref vars' sfields
+substStmt (PubTrait i vars methods) = do
+  vars' <- mapM freshSkolem vars
+  smethods <- forM methods $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  return $ PubTrait ref vars' smethods
+substStmt (PubTraitWithKinds i vars methods) = do
+  vars' <- mapM (freshSkolem . fst) vars
+  smethods <- forM methods $ \(f, ty) -> do
+    sty <- substTy ty
+    return (f, sty)
+  ref <- freshSkolem i
+  let traitStmt' = PubTrait ref vars' smethods
+  modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
+  return traitStmt'
+substStmt (Use _modPath _items) = do
+  -- For now, ignore use statements during substitution
+  -- TODO: Implement proper module system
+  return $ Use _modPath _items
+substStmt (PubUse _modPath _items) = do
+  -- For now, ignore pub use statements during substitution  
+  -- TODO: Implement proper module system
+  return $ PubUse _modPath _items
+substStmt (UseAll _modPath) = do
+  -- For now, ignore use all statements during substitution
+  -- TODO: Implement proper module system
+  return $ UseAll _modPath
+substStmt (PubUseAll _modPath) = do
+  -- For now, ignore pub use all statements during substitution
+  -- TODO: Implement proper module system
+  return $ PubUseAll _modPath
 
 substBlock :: PBlock -> Subst SBlock
 substBlock (Block stmts e) = Block <$> mapM substStmt stmts <*> substExpr e

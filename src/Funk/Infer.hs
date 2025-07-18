@@ -52,7 +52,6 @@ generateBidirectionalConstraints expr expectedType = case expr of
             TApp constructor _ -> do
               -- If expected is State #Unit, then target should be State
               -- Generate constraint: target = State
-              -- DEBUG: This should generate CEq t57 State for our example
               return [CEq targetType constructor]
             _ -> do
               -- Fallback: connect the method result type with expected type
@@ -90,6 +89,7 @@ extractTraitMethodConstraints expr expectedType = case expr of
 constraintsExpr :: SExpr -> Fresh [Constraint]
 constraintsExpr = \case
   Var _ _ -> return []
+  QualifiedVar _ _ _ -> return []
   App ty t1 t2 -> do
     cs1 <- constraintsExpr t1
     cs2 <- constraintsExpr t2
@@ -247,6 +247,25 @@ constraintsStmt (Trait {}) = return []
 constraintsStmt (TraitWithKinds {}) = return []
 constraintsStmt (Impl _ _ _ methods) = do
   concat <$> mapM (constraintsExpr . snd) methods
+constraintsStmt (PubLet ty _ mty body) = do
+  -- Same as Let but for pub visibility
+  (csBody, additionalConstraints) <- case mty of
+    Just ann -> do
+      bidiConstraints <- constraintsExprWithExpected body ann
+      return ([], bidiConstraints ++ [CEq (TVar ty) ann])
+    Nothing -> do
+      normalConstraints <- constraintsExpr body
+      return (normalConstraints, [])
+  return $ CEq (TVar ty) (TVar $ typeOf body) : csBody ++ additionalConstraints
+constraintsStmt (PubType {}) = return []
+constraintsStmt (PubData {}) = return []
+constraintsStmt (PubDataForall {}) = return []
+constraintsStmt (Use {}) = return []
+constraintsStmt (PubTrait {}) = return []
+constraintsStmt (PubTraitWithKinds {}) = return []
+constraintsStmt (PubUse {}) = return []
+constraintsStmt (UseAll {}) = return []
+constraintsStmt (PubUseAll {}) = return []
 
 constraintsBlock :: SBlock -> Fresh [Constraint]
 constraintsBlock (Block stmts expr) = do

@@ -15,42 +15,166 @@ import Funk.Compiler (compile)
 import Funk.Interpreter (evalProgramIO, prettyValue, Value(..))
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
+import System.FilePath (dropExtension, takeFileName, takeExtension)
+import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
+import System.FilePath ((</>))
+import Control.Monad (forM)
+import qualified Data.Map as Map
 import Text.Parsec
 import Text.Parsec.Error
 import qualified Text.PrettyPrint as Pretty
 
 data Options = Options
-  { optionsFilePath :: FilePath
+  { optionsMainFile :: FilePath         -- Required main file
+  , optionsLibPaths :: [FilePath]       -- Optional library files/directories  
   , optionsInterpret :: Bool
   }
 
 options :: Parser Options
 options =
   Options 
-    <$> argument str (metavar "FILE" <> help "Path to the input file")
+    <$> argument str (metavar "MAIN_FILE" <> help "Main Funk file to execute")
+    <*> Options.Applicative.many (strOption (long "lib" <> short 'L' <> metavar "LIB_PATH" <> help "Library file or directory (can be used multiple times)"))
     <*> switch (long "interpret" <> short 'i' <> help "Run the interpreter instead of pretty-printing")
 
 run :: IO ()
 run = do
   opts <- execParser $ info (options <**> helper) fullDesc
-  input <- readFile (optionsFilePath opts)
-  res <- tryRun input
-  case res of
-    Left err -> showErrorPretty err input >>= putStrLn
-    Right block -> do
-      if optionsInterpret opts
-        then do
-          -- Compile to Core and run interpreter
-          coreProgram <- compile block
-          result <- evalProgramIO coreProgram
-          case result of
-            Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
-            Right VUnit -> return () -- Don't print unit results from IO actions
-            Right resultVal -> putStrLn $ prettyValue resultVal
-        else do
-          -- Output the pretty-printed resolved AST with proper type resolution
-          resolvedBlock <- sBlockToDisplayWithTypes block
-          putStrLn $ showFileWithTypes [] resolvedBlock
+  
+  -- Verify main file exists
+  mainExists <- doesFileExist (optionsMainFile opts)
+  if not mainExists
+    then putStrLn $ "Error: Main file not found: " ++ optionsMainFile opts
+    else do
+      -- Expand library paths to individual .funk files
+      libResult <- expandInputPaths (optionsLibPaths opts)
+      
+      case libResult of
+        Left errorMsg -> putStrLn $ "Error: " ++ errorMsg
+        Right libFiles -> do
+          -- Combine main file with library files for module loading
+          let allFiles = optionsMainFile opts : libFiles
+          
+          -- Load and resolve all modules
+          moduleResult <- loadModules allFiles
+          case moduleResult of
+            Left moduleError -> putStrLn $ "Error: " ++ moduleError
+            Right moduleMap -> do
+              mainInput <- readFile (optionsMainFile opts)
+              
+              -- Combine library files with main file
+              let libInputs = Map.elems moduleMap
+              let combinedInput = unlines (libInputs ++ [mainInput])
+              
+              res <- tryRun combinedInput
+              case res of
+                Left err -> showErrorPretty err mainInput >>= putStrLn  
+                Right block -> do
+                  if optionsInterpret opts
+                    then do
+                      -- Compile to Core and run interpreter
+                      coreProgram <- compile block
+                      result <- evalProgramIO coreProgram
+                      case result of
+                        Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
+                        Right VUnit -> return () -- Don't print unit results from IO actions
+                        Right resultVal -> putStrLn $ prettyValue resultVal
+                    else do
+                      -- Output the pretty-printed resolved AST with proper type resolution
+                      resolvedBlock <- sBlockToDisplayWithTypes block
+                      putStrLn $ showFileWithTypes [] resolvedBlock
+
+-- Recursively find all .funk files in a directory
+findFunkFiles :: FilePath -> IO [FilePath]
+findFunkFiles path = do
+  isDir <- doesDirectoryExist path
+  if isDir
+    then do
+      entries <- listDirectory path
+      allFiles <- forM entries $ \entry -> do
+        let fullPath = path </> entry
+        findFunkFiles fullPath
+      return $ concat allFiles
+    else do
+      exists <- doesFileExist path
+      if exists && takeExtension path == ".funk"
+        then return [path]
+        else return []
+
+-- Expand input paths to include all .funk files from directories
+-- Fails if an explicitly specified file doesn't exist
+expandInputPaths :: [FilePath] -> IO (Either String [FilePath])
+expandInputPaths paths = do
+  results <- forM paths $ \path -> do
+    isDir <- doesDirectoryExist path
+    if isDir
+      then do
+        files <- findFunkFiles path
+        return $ Right files
+      else do
+        exists <- doesFileExist path
+        if exists
+          then return $ Right [path]
+          else return $ Left $ "Library file not found: " ++ path
+  
+  let (errors, successes) = partitionEithers results
+  if null errors
+    then return $ Right $ concat successes
+    else return $ Left $ unlines errors
+  where
+    partitionEithers :: [Either a b] -> ([a], [b])
+    partitionEithers = foldr (either left right) ([], [])
+      where
+        left  a (l, r) = (a:l, r)
+        right b (l, r) = (l, b:r)
+
+-- Validate that a library file has valid syntax
+validateLibraryFile :: FilePath -> IO (Either String ())
+validateLibraryFile filePath = do
+  exists <- doesFileExist filePath
+  if not exists
+    then return $ Left $ "Library file not found: " ++ filePath
+    else do
+      content <- readFile filePath
+      let result = tokenize content >>= parseTopLevel
+      case result of
+        Left err -> return $ Left $ "Parse error in " ++ filePath ++ ": " ++ show err
+        Right _ -> return $ Right ()
+
+-- Load multiple module files into a map after validating syntax
+loadModules :: [FilePath] -> IO (Either String (Map.Map String String))
+loadModules filePaths = do
+  -- First validate all library files
+  validationResults <- forM filePaths $ \filePath -> do
+    if filePath == head filePaths  -- Skip main file (validated separately)
+      then return $ Right ()
+      else validateLibraryFile filePath
+  
+  let errors = [err | Left err <- validationResults]
+  if not (null errors)
+    then return $ Left $ unlines errors
+    else do
+      -- If all files are valid, load them
+      modules <- forM filePaths $ \filePath -> do
+        exists <- doesFileExist filePath
+        if exists
+          then do
+            content <- readFile filePath
+            let modName = filePathToModuleName filePath
+            return (modName, content)
+          else do
+            putStrLn $ "Warning: File not found: " ++ filePath
+            return ("", "")
+      return $ Right $ Map.fromList $ filter ((/= "") . fst) modules
+
+-- Convert file path to module name (e.g., "Math.funk" -> "Math", "nested/Advanced.funk" -> "Nested.Advanced")  
+filePathToModuleName :: FilePath -> String
+filePathToModuleName filePath = 
+  let baseName = takeFileName filePath
+      nameWithoutExt = dropExtension baseName
+  in if nameWithoutExt == ""
+     then ""
+     else nameWithoutExt
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do

@@ -315,6 +315,7 @@ blockExpr (Block _ e) = e
 typeOf :: SExpr -> STBinding
 typeOf = \case
   Var ty _ -> ty
+  QualifiedVar ty _ _ -> ty
   App ty _ _ -> ty
   Lam (SLam _ ty) _ _ _ -> ty
   TyApp ty _ _ -> ty
@@ -346,6 +347,10 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     -- For variables, we'll add the type as a synthetic lambda annotation
     _ <- sTypeToDisplay (TVar (typeOf sexpr))
     return $ Var () binding'
+  QualifiedVar _ modPath binding -> do
+    binding' <- sBindingToIdent binding
+    _ <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ QualifiedVar () modPath binding'
   App _ t1 t2 -> do
     t1' <- sExprToDisplayWithTypes t1
     t2' <- sExprToDisplayWithTypes t2
@@ -529,6 +534,53 @@ sStmtToDisplay = \case
       e' <- sExprToDisplay e
       return (f, e')
     return $ Impl binding' vars' ty' methods'
+  PubLet _ v mty body -> do
+    v' <- sBindingToIdent v
+    mty' <- mapM sTypeToDisplay mty
+    body' <- case mty' of
+      Just annotationType -> do
+        case body of
+          Lam {} -> resolveLambdaWithTypeAnnotation body annotationType
+          _ -> do
+            _ <- sExprToDisplay body
+            resolveTraitMethodsWithType body annotationType
+      Nothing -> sExprToDisplay body
+    return $ PubLet () v' mty' body'
+  PubType binding ty -> do
+    binding' <- sTBindingToIdent binding
+    ty' <- sTypeToDisplay ty
+    return $ PubType binding' ty'
+  PubData binding fields -> do
+    binding' <- sTBindingToIdent binding
+    fields' <- forM fields $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ PubData binding' fields'
+  PubDataForall binding vars fields -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent vars
+    fields' <- forM fields $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ PubDataForall binding' vars' fields'
+  PubTrait binding vars methods -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM sTBindingToIdent vars
+    methods' <- forM methods $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ PubTrait binding' vars' methods'
+  PubTraitWithKinds binding vars methods -> do
+    binding' <- sTBindingToIdent binding
+    vars' <- mapM (sTBindingToIdent . fst) vars
+    methods' <- forM methods $ \(f, ty) -> do
+      ty' <- sTypeToDisplay ty
+      return (f, ty')
+    return $ PubTrait binding' vars' methods'
+  Use modPath names -> return $ Use modPath names
+  UseAll modPath -> return $ UseAll modPath
+  PubUse modPath names -> return $ PubUse modPath names
+  PubUseAll modPath -> return $ PubUseAll modPath
 
 sBlockToDisplayWithTypes :: SBlock -> IO (Block Ident)
 sBlockToDisplayWithTypes (Block stmts expr) = do

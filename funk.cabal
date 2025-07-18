@@ -32,6 +32,8 @@ library
         base >=4,
         ansi-terminal,
         containers,
+        directory,
+        filepath,
         mtl,
         optparse-applicative,
         parsec,
