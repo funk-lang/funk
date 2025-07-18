@@ -331,6 +331,18 @@ substStmt (Data i fields) = do
       { envVars = Map.insert (unLocated i) (SBinding vRef) (envVars env),
         envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
       }
+  
+  -- Add field accessors to the environment
+  forM_ fields $ \(fieldIdent, _fieldTy) -> do
+    fieldRef <- liftIO $ newIORef (VUnbound (Located (locatedPos i) fieldIdent))
+    -- Field accessor type: create fresh unbound type for now
+    fieldAccessorTy <- freshUnboundTy (locatedPos i)
+    modify $ \env ->
+      env
+        { envVars = Map.insert fieldIdent (SBinding fieldRef) (envVars env),
+          envVarTypes = Map.insert fieldIdent fieldAccessorTy (envVarTypes env)
+        }
+  
   return $ Data ref sfields
 substStmt (DataForall i vars fields) = do
   vars' <- mapM freshSkolem vars
@@ -344,6 +356,18 @@ substStmt (DataForall i vars fields) = do
       { envVars = Map.insert (unLocated i) (SBinding vRef) (envVars env),
         envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
       }
+  
+  -- Add field accessors to the environment
+  forM_ fields $ \(fieldIdent, _fieldTy) -> do
+    fieldRef <- liftIO $ newIORef (VUnbound (Located (locatedPos i) fieldIdent))
+    -- Field accessor type: create fresh unbound type for now
+    fieldAccessorTy <- freshUnboundTy (locatedPos i)
+    modify $ \env ->
+      env
+        { envVars = Map.insert fieldIdent (SBinding fieldRef) (envVars env),
+          envVarTypes = Map.insert fieldIdent fieldAccessorTy (envVarTypes env)
+        }
+  
   return $ DataForall ref vars' sfields
 substStmt (Trait i vars methods) = do
   vars' <- mapM freshSkolem vars
@@ -395,6 +419,24 @@ substStmt (PubData i fields) = do
     sty <- substTy ty
     return (f, sty)
   ref <- freshSkolem i
+  vRef <- liftIO $ newIORef (VUnbound i)
+  modify $ \env ->
+    env
+      { envVars = Map.insert (unLocated i) (SBinding vRef) (envVars env),
+        envVarTypes = Map.insert (unLocated i) ref (envVarTypes env)
+      }
+  
+  -- Add field accessors to the environment
+  forM_ fields $ \(fieldIdent, _fieldTy) -> do
+    fieldRef <- liftIO $ newIORef (VUnbound (Located (locatedPos i) fieldIdent))
+    -- Field accessor type: create fresh unbound type for now
+    fieldAccessorTy <- freshUnboundTy (locatedPos i)
+    modify $ \env ->
+      env
+        { envVars = Map.insert fieldIdent (SBinding fieldRef) (envVars env),
+          envVarTypes = Map.insert fieldIdent fieldAccessorTy (envVarTypes env)
+        }
+  
   return $ PubData ref sfields
 substStmt (PubDataForall i vars fields) = do
   vars' <- mapM freshSkolem vars

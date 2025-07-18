@@ -69,6 +69,12 @@ intType = tok TokIntType $> TInt
 boolType :: Parser PType
 boolType = tok TokBoolType $> TBool
 
+ioType :: Parser PType
+ioType = do
+  tok TokIOType
+  arg <- atomicType
+  return (TIO arg)
+
 parensType :: Parser PType
 parensType = tok TokLParen *> typeExpr <* tok TokRParen
 
@@ -85,6 +91,7 @@ atomicType =
   choice
     [ try forallType,
       listType,
+      ioType,
       unitType,
       stringType,
       intType,

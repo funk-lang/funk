@@ -55,6 +55,7 @@ data Token
   | TokStringType
   | TokIntType
   | TokBoolType
+  | TokIOType
   | TokNil
   | TokCons
   | TokPrint
@@ -108,6 +109,7 @@ instance Show Token where
     TokStringType -> "'#String'"
     TokIntType -> "'#Int'"
     TokBoolType -> "'#Bool'"
+    TokIOType -> "'#IO'"
     TokTrue -> "'#true'"
     TokFalse -> "'#false'"
     TokNil -> "'#nil'"
@@ -189,6 +191,7 @@ token = do
         "#String" -> TokStringType
         "#Int" -> TokIntType
         "#Bool" -> TokBoolType
+        "#IO" -> TokIOType
         "#true" -> TokTrue
         "#false" -> TokFalse
         "#nil" -> TokNil

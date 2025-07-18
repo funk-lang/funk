@@ -1,54 +1,44 @@
-let assertEqual = \expected actual name -> {
-  let passed = #stringEq expected actual;
-  let message = #ifThenElse passed 
-    (\_ -> "PASS") 
-    (\_ -> "FAIL");
-  #bindIO (print (#stringConcat name (#stringConcat ": " message))) (\_ ->
-    #ifThenElse passed 
-      (\_ -> #pureIO #Unit)
-      (\_ -> #exit 1)
-  )
-};
-
-let assertEqualInt = \expected actual name -> {
-  let passed = #intEq expected actual;
-  let message = #ifThenElse passed 
-    (\_ -> "PASS") 
-    (\_ -> "FAIL");
-  #bindIO (print (#stringConcat name (#stringConcat ": " message))) (\_ ->
-    #ifThenElse passed 
-      (\_ -> #pureIO #Unit)
-      (\_ -> #exit 1)
-  )
-};
-
-let assertTrue = \condition name -> {
-  let message = #ifThenElse condition (\_ -> "PASS") (\_ -> "FAIL");
-  #bindIO (print (#stringConcat name (#stringConcat ": " message))) (\_ ->
-    #ifThenElse condition 
-      (\_ -> #pureIO #Unit)
-      (\_ -> #exit 1)
-  )
-};
-
-let assertFalse = \condition name -> {
-  let passed = #ifThenElse condition (\_ -> #false) (\_ -> #true);
-  let message = #ifThenElse passed (\_ -> "PASS") (\_ -> "FAIL");
-  #bindIO (print (#stringConcat name (#stringConcat ": " message))) (\_ ->
-    #ifThenElse passed 
-      (\_ -> #pureIO #Unit)
-      (\_ -> #exit 1)
-  )
-};
-
--- Simple test builder
-let describe = \name testFunc -> 
-  #bindIO (print (#stringConcat "Test Suite: " name)) (\_ ->
-    testFunc
-  );
-
--- Individual test builder  
-let it = \name testFunc -> 
-  #bindIO (print (#stringConcat "  " name)) (\_ ->
-    testFunc
-  );
+let assertEqual = \expected actual -> \name -> {let passed = #stringEq expected
+  actual;
+let message = #ifThenElse passed
+  (\_ -> "PASS")
+  (\_ -> "FAIL");
+let nameMsg = #stringConcat name ": ";
+let fullMsg = #stringConcat nameMsg message;
+#bindIO (print fullMsg) (\_ -> #ifThenElse passed
+  (\_ -> #pureIO #Unit)
+  (\_ -> #exit 1))};
+let assertEqualInt = \expected actual -> \name -> {let passed = #intEq expected
+  actual;
+let message = #ifThenElse passed
+  (\_ -> "PASS")
+  (\_ -> "FAIL");
+let nameMsg = #stringConcat name ": ";
+let fullMsg = #stringConcat nameMsg message;
+#bindIO (print fullMsg) (\_ -> #ifThenElse passed
+  (\_ -> #pureIO #Unit)
+  (\_ -> #exit 1))};
+let assertTrue = \condition name -> {let message = #ifThenElse condition
+  (\_ -> "PASS")
+  (\_ -> "FAIL");
+let nameMsg = #stringConcat name ": ";
+let fullMsg = #stringConcat nameMsg message;
+#bindIO (print fullMsg) (\_ -> #ifThenElse condition
+  (\_ -> #pureIO #Unit)
+  (\_ -> #exit 1))};
+let assertFalse = \condition name -> {let passed = #ifThenElse condition
+  (\_ -> #false)
+  (\_ -> #true);
+let message = #ifThenElse passed
+  (\_ -> "PASS")
+  (\_ -> "FAIL");
+let nameMsg = #stringConcat name ": ";
+let fullMsg = #stringConcat nameMsg message;
+#bindIO (print fullMsg) (\_ -> #ifThenElse passed
+  (\_ -> #pureIO #Unit)
+  (\_ -> #exit 1))};
+let describe = \name testFunc -> {let suiteMsg = #stringConcat "Test Suite: "
+  name;
+#bindIO (print suiteMsg) (\_ -> testFunc)};
+let it = \name testFunc -> {let testMsg = #stringConcat "  " name;
+#bindIO (print testMsg) (\_ -> testFunc)};

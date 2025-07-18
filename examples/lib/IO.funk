@@ -1,38 +1,34 @@
-data IO a = {
-  unIO: a
-}
+data IO a = {unIO: #IO a}
 
 trait Functor (f :: * -> *) {
-  fmap: forall a b . (a -> b) -> f a -> f b
+  fmap: forall a b . ((a -> b) -> (f a -> f b))
 }
 
 trait Applicative (f :: * -> *) {
-  apply: forall a b . f (a -> b) -> f a -> f b
+  apply: forall a b . (f (a -> b) -> (f a -> f b))
 }
 
 trait Monad (m :: * -> *) {
-  return: forall a . a -> m a,
-  bind: forall a b . m a -> (a -> m b) -> m b
+  return: forall a . (a -> m a),
+  bind: forall a b . (m a -> ((a -> m b) -> m b))
 }
 
-instance Functor forall a . IO = {
-  fmap = #fmapIO
-}
+let compose = \f g -> \x -> f g x;
 
-instance Applicative forall a . IO = {
-  apply = #applyIO
-}
+instance Functor IO = {fmap = \f fa -> IO {unIO = #fmapIO f (unIO fa)}}
 
-instance Monad forall a . IO = {
-  return = #pureIO,
-  bind = #bindIO
-}
+instance Applicative IO = {apply = \f a -> bind f (\fn -> bind a (\val ->
+  return fn val))}
 
-let wrapIO = \x -> IO { unIO = x };
+instance Monad IO = {return = \a -> IO {unIO = #pureIO a}, bind = \m f -> IO
+  {unIO = #bindIO (unIO m) (\x -> unIO (f x))}}
+
+let wrapIO = \x -> IO {unIO = x};
 let print = \x -> #print x;
-let testIO = IO { unIO = "Hello from IO!" };
+let testIO = IO {unIO = #pureIO "Hello from IO!"};
 let identity = \x -> x;
 let printTest = print "Hello from IO print wrapper!";
 let printTest2 = print "Testing multiple IO actions!";
-
-let replicateM_ = \n action -> #ifThenElse (#intEq n 0) (\_ -> #pureIO #Unit) (\_ -> #bindIO action (\_ -> replicateM_ (#intSub n 1) action));
+let replicateM_ = \n action -> #ifThenElse #intEq n 0
+  (\_ -> #pureIO #Unit)
+  (\_ -> #bindIO action (\_ -> replicateM_ (#intSub n 1) action));

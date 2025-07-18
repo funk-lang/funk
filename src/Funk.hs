@@ -13,54 +13,81 @@ import Funk.Term
 import Funk.Token
 import Funk.Compiler (compile)
 import Funk.Interpreter (evalProgramIO, prettyValue, Value(..))
+import Funk.Fmt (formatFile, FmtOptions(..))
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
-import System.FilePath (dropExtension, takeFileName, takeExtension)
 import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeExtension, takeFileName, dropExtension)
 import Control.Monad (forM)
 import qualified Data.Map as Map
 import Text.Parsec
 import Text.Parsec.Error
 import qualified Text.PrettyPrint as Pretty
 
-data Options = Options
-  { optionsMainFile :: FilePath         -- Required main file
-  , optionsLibPaths :: [FilePath]       -- Optional library files/directories  
-  , optionsInterpret :: Bool
-  }
+data Command
+  = RunCommand RunOptions
+  | FmtCommand FmtOptions
+  deriving (Show)
 
-options :: Parser Options
-options =
-  Options 
+data RunOptions = RunOptions
+  { runMainFile :: FilePath         -- Required main file
+  , runLibPaths :: [FilePath]       -- Optional library files/directories  
+  , runInterpret :: Bool
+  } deriving (Show)
+
+runCommand :: Parser RunOptions
+runCommand = 
+  RunOptions
     <$> argument str (metavar "MAIN_FILE" <> help "Main Funk file to execute")
     <*> Options.Applicative.many (strOption (long "lib" <> short 'L' <> metavar "LIB_PATH" <> help "Library file or directory (can be used multiple times)"))
     <*> switch (long "interpret" <> short 'i' <> help "Run the interpreter instead of pretty-printing")
 
+fmtCommand :: Parser FmtOptions
+fmtCommand = 
+  FmtOptions
+    <$> argument str (metavar "FILE_OR_DIR" <> help "Funk file or directory to format")
+    <*> switch (long "in-place" <> short 'i' <> help "Modify files in place")
+
+commands :: Parser Command
+commands = subparser
+  ( command "run" (info (RunCommand <$> runCommand) (progDesc "Run a Funk program"))
+  <> command "fmt" (info (FmtCommand <$> fmtCommand) (progDesc "Format Funk files or directories"))
+  )
+
 run :: IO ()
 run = do
-  opts <- execParser $ info (options <**> helper) fullDesc
+  cmd <- execParser $ info (commands <**> helper) 
+    ( fullDesc
+    <> progDesc "Funk programming language"
+    <> header "funk - a functional programming language"
+    )
   
+  case cmd of
+    RunCommand opts -> runProgram opts
+    FmtCommand opts -> formatFile opts
+
+runProgram :: RunOptions -> IO ()
+runProgram opts = do
   -- Verify main file exists
-  mainExists <- doesFileExist (optionsMainFile opts)
+  mainExists <- doesFileExist (runMainFile opts)
   if not mainExists
-    then putStrLn $ "Error: Main file not found: " ++ optionsMainFile opts
+    then putStrLn $ "Error: Main file not found: " ++ runMainFile opts
     else do
       -- Expand library paths to individual .funk files
-      libResult <- expandInputPaths (optionsLibPaths opts)
+      libResult <- expandInputPaths (runLibPaths opts)
       
       case libResult of
         Left errorMsg -> putStrLn $ "Error: " ++ errorMsg
         Right libFiles -> do
           -- Combine main file with library files for module loading
-          let allFiles = optionsMainFile opts : libFiles
+          let allFiles = runMainFile opts : libFiles
           
           -- Load and resolve all modules
           moduleResult <- loadModules allFiles
           case moduleResult of
             Left moduleError -> putStrLn $ "Error: " ++ moduleError
             Right moduleMap -> do
-              mainInput <- readFile (optionsMainFile opts)
+              mainInput <- readFile (runMainFile opts)
               
               -- Combine library files with main file
               let libInputs = Map.elems moduleMap
@@ -68,9 +95,9 @@ run = do
               
               res <- tryRun combinedInput
               case res of
-                Left err -> showErrorPretty err mainInput >>= putStrLn  
+                Left err -> showErrorPretty err combinedInput >>= putStrLn  
                 Right block -> do
-                  if optionsInterpret opts
+                  if runInterpret opts
                     then do
                       -- Compile to Core and run interpreter
                       coreProgram <- compile block
@@ -138,7 +165,9 @@ validateLibraryFile filePath = do
       content <- readFile filePath
       let result = tokenize content >>= parseTopLevel
       case result of
-        Left err -> return $ Left $ "Parse error in " ++ filePath ++ ": " ++ show err
+        Left err -> do
+          let prettyError = showParseErrorPretty err content
+          return $ Left $ "Parse error in " ++ filePath ++ ":\n" ++ prettyError
         Right _ -> return $ Right ()
 
 -- Load multiple module files into a map after validating syntax
