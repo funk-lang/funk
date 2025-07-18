@@ -1,0 +1,77 @@
+-- Simple test framework inspired by HSpec
+-- Provides basic assertion and test running functionality
+
+-- Simple test function that prints result and exits with appropriate code
+let assertEqual = \expected actual name -> 
+  let passed = #stringEq expected actual in
+  let message = #ifThenElse passed 
+    "PASS" 
+    "FAIL" in
+  #bindIO (print (name ++ ": " ++ message)) (\_ ->
+    #ifThenElse passed 
+      (#pureIO #Unit)
+      (#exit 1)
+  );
+
+let assertEqualInt = \expected actual name -> 
+  let passed = #intEq expected actual in
+  let message = #ifThenElse passed 
+    "PASS" 
+    "FAIL" in
+  #bindIO (print (name ++ ": " ++ message)) (\_ ->
+    #ifThenElse passed 
+      (#pureIO #Unit)
+      (#exit 1)
+  );
+
+let assertTrue = \condition name -> 
+  let message = #ifThenElse condition "PASS" "FAIL" in
+  #bindIO (print (name ++ ": " ++ message)) (\_ ->
+    #ifThenElse condition 
+      (#pureIO #Unit)
+      (#exit 1)
+  );
+
+let assertFalse = \condition name -> 
+  let passed = #ifThenElse condition #false #true in
+  let message = #ifThenElse passed "PASS" "FAIL" in
+  #bindIO (print (name ++ ": " ++ message)) (\_ ->
+    #ifThenElse passed 
+      (#pureIO #Unit)
+      (#exit 1)
+  );
+
+-- Test runner that executes tests sequentially
+let runTests = \testList ->
+  #bindIO (print "Running tests...") (\_ ->
+    #bindIO (executeTests testList) (\_ ->
+      #bindIO (print "All tests passed!") (\_ ->
+        #exit 0
+      )
+    )
+  );
+
+-- Helper to execute a list of tests
+let executeTests = \tests ->
+  #ifThenElse (isEmptyTests tests) 
+    (#pureIO #Unit)
+    (#bindIO (executeFirstTest tests) (\_ ->
+      executeTests (restTests tests)
+    ));
+
+-- Test list helpers (simplified)
+let isEmptyTests = \tests -> #false;  -- Placeholder - assume non-empty for now
+let executeFirstTest = \tests -> #pureIO #Unit;  -- Placeholder
+let restTests = \tests -> tests;  -- Placeholder
+
+-- Simple test builder
+let describe = \name testFunc -> 
+  #bindIO (print ("Test Suite: " ++ name)) (\_ ->
+    testFunc
+  );
+
+-- Individual test builder  
+let it = \name testFunc -> 
+  #bindIO (print ("  " ++ name)) (\_ ->
+    testFunc
+  );

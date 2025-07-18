@@ -7,6 +7,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Data.Map (Map)
 import qualified Data.Map as Map
+import System.Exit (ExitCode(ExitSuccess, ExitFailure), exitWith)
 import Funk.Core
 
 data Value
@@ -235,6 +236,13 @@ eval = \case
       (VInt i1, VInt i2) -> return $ if i1 == i2 then VCon "True" [] else VCon "False" []
       _ -> throwError "Type error: intEq expects two integers"
 
+  CoreStringEq e1 e2 -> do
+    v1 <- eval e1
+    v2 <- eval e2
+    case (v1, v2) of
+      (VString s1, VString s2) -> return $ if s1 == s2 then VCon "True" [] else VCon "False" []
+      _ -> throwError "Type error: stringEq expects two strings"
+
   CoreIfThenElse c t e -> do
     v <- eval c
     case v of
@@ -248,6 +256,13 @@ eval = \case
     case (v1, v2) of
       (VInt i1, VInt i2) -> return $ VInt (i1 - i2)
       _ -> throwError "Type error: intSub expects two integers"
+
+  CoreExit e -> do
+    v <- eval e
+    case v of
+      VInt code -> return $ VIO $ do
+        exitWith (if code == 0 then ExitSuccess else ExitFailure code)
+      _ -> throwError "Type error: exit expects an integer"
 
 applyFunction :: Value -> Value -> Interp Value
 applyFunction funcVal argVal = case funcVal of

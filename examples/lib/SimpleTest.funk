@@ -1,0 +1,35 @@
+let assertEqual = \expected actual name -> 
+  #bindIO (print name) (\_ ->
+    #bindIO (print (#ifThenElse (#stringEq expected actual) "PASS" "FAIL")) (\_ ->
+      #ifThenElse (#stringEq expected actual) 
+        (#pureIO #Unit)
+        (#exit 1)
+    )
+  );
+
+let assertEqualInt = \expected actual name -> 
+  #bindIO (print name) (\_ ->
+    #bindIO (print (#ifThenElse (#intEq expected actual) "PASS" "FAIL")) (\_ ->
+      #ifThenElse (#intEq expected actual) 
+        (#pureIO #Unit)
+        (#exit 1)
+    )
+  );
+
+let assertTrue = \condition name -> 
+  #bindIO (print name) (\_ ->
+    #bindIO (print (#ifThenElse condition "PASS" "FAIL")) (\_ ->
+      #ifThenElse condition 
+        (#pureIO #Unit)
+        (#exit 1)
+    )
+  );
+
+let assertFalse = \condition name -> 
+  #bindIO (print name) (\_ ->
+    #bindIO (print (#ifThenElse condition "FAIL" "PASS")) (\_ ->
+      #ifThenElse condition 
+        (#exit 1)
+        (#pureIO #Unit)
+    )
+  );

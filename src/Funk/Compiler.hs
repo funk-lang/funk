@@ -220,6 +220,11 @@ compileResolvedExpr = \case
     coreE2 <- compileResolvedExpr e2
     return $ CoreIntEq coreE1 coreE2
 
+  Term.PrimStringEq _ e1 e2 -> do
+    coreE1 <- compileResolvedExpr e1
+    coreE2 <- compileResolvedExpr e2
+    return $ CoreStringEq coreE1 coreE2
+
   Term.PrimIfThenElse _ c t e -> do
     coreC <- compileResolvedExpr c
     coreT <- compileResolvedExpr t
@@ -230,6 +235,10 @@ compileResolvedExpr = \case
     coreE1 <- compileResolvedExpr e1
     coreE2 <- compileResolvedExpr e2
     return $ CoreIntSub coreE1 coreE2
+
+  Term.PrimExit _ e -> do
+    coreE <- compileResolvedExpr e
+    return $ CoreExit coreE
 
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr

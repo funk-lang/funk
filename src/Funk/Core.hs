@@ -57,8 +57,10 @@ data CoreExpr
   | CoreApplyIO CoreExpr CoreExpr        -- Primitive apply for IO
   | CoreBindIO CoreExpr CoreExpr         -- Primitive bind for IO
   | CoreIntEq CoreExpr CoreExpr          -- Primitive int equality
+  | CoreStringEq CoreExpr CoreExpr       -- Primitive string equality
   | CoreIfThenElse CoreExpr CoreExpr CoreExpr -- Primitive if/then/else
   | CoreIntSub CoreExpr CoreExpr         -- Primitive integer subtraction
+  | CoreExit CoreExpr                    -- Exit with code
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -199,6 +201,11 @@ prettyCoreExpr p (CoreIntEq e1 e2) =
       e2' = prettyCoreExpr (p+1) e2
   in parensIf (p > 0) (text "intEq" <+> e1' <+> e2')
 
+prettyCoreExpr p (CoreStringEq e1 e2) =
+  let e1' = prettyCoreExpr (p+1) e1
+      e2' = prettyCoreExpr (p+1) e2
+  in parensIf (p > 0) (text "stringEq" <+> e1' <+> e2')
+
 prettyCoreExpr p (CoreIfThenElse c t e) =
   let c' = prettyCoreExpr (p+1) c
       t' = prettyCoreExpr (p+1) t
@@ -209,6 +216,10 @@ prettyCoreExpr p (CoreIntSub e1 e2) =
   let e1' = prettyCoreExpr (p+1) e1
       e2' = prettyCoreExpr (p+1) e2
   in parensIf (p > 0) (text "intSub" <+> e1' <+> e2')
+
+prettyCoreExpr p (CoreExit e) =
+  let e' = prettyCoreExpr (p+1) e
+  in parensIf (p > 0) (text "exit" <+> e')
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =

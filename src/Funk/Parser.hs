@@ -231,6 +231,13 @@ primIntEqExpr = do
   e2 <- atomicExpr
   return $ PrimIntEq () e1 e2
 
+primStringEqExpr :: Parser PExpr
+primStringEqExpr = do
+  tok TokStringEq
+  e1 <- atomicExpr
+  e2 <- atomicExpr
+  return $ PrimStringEq () e1 e2
+
 primIfThenElseExpr :: Parser PExpr
 primIfThenElseExpr = do
   _ <- tok TokIfThenElse
@@ -245,6 +252,11 @@ primIntSubExpr = do
   e1 <- atomicExpr
   e2 <- atomicExpr
   return $ PrimIntSub () e1 e2
+
+primExitExpr :: Parser PExpr
+primExitExpr = do
+  tok TokExit
+  PrimExit () <$> atomicExpr
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
@@ -500,6 +512,8 @@ expr =
     [ try lambdaExpr,
       try primIfThenElseExpr,
       try primIntSubExpr,
+      try primStringEqExpr,
+      try primExitExpr,
       appExpr
     ]
 

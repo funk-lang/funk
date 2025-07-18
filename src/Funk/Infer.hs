@@ -208,6 +208,15 @@ constraintsExpr = \case
                CEq (TVar (typeOf e2)) TInt
              ] ++ cs1 ++ cs2
 
+  PrimStringEq ty e1 e2 -> do
+    -- #stringEq e1 e2 has type #Bool, where e1 and e2 have type #String
+    cs1 <- constraintsExpr e1
+    cs2 <- constraintsExpr e2
+    return $ [ CEq (TVar ty) TBool,
+               CEq (TVar (typeOf e1)) TString,
+               CEq (TVar (typeOf e2)) TString
+             ] ++ cs1 ++ cs2
+
   PrimIfThenElse ty c t e -> do
     -- #if c then t else e has type a, where c has type #Bool and t and e have type a
     csC <- constraintsExpr c
@@ -226,6 +235,13 @@ constraintsExpr = \case
                CEq (TVar (typeOf e1)) TInt,
                CEq (TVar (typeOf e2)) TInt
              ] ++ cs1 ++ cs2
+
+  PrimExit ty e -> do
+    -- #exit e has type #IO #Unit, where e has type #Int
+    csE <- constraintsExpr e
+    return $ [ CEq (TVar ty) (TIO TUnit),
+               CEq (TVar (typeOf e)) TInt
+             ] ++ csE
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do

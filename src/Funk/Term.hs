@@ -139,8 +139,10 @@ data Expr b
   | PrimApplyIO (BVar b) (Expr b) (Expr b)
   | PrimBindIO (BVar b) (Expr b) (Expr b)
   | PrimIntEq (BVar b) (Expr b) (Expr b)
+  | PrimStringEq (BVar b) (Expr b) (Expr b)
   | PrimIfThenElse (BVar b) (Expr b) (Expr b) (Expr b)
   | PrimIntSub (BVar b) (Expr b) (Expr b)
+  | PrimExit (BVar b) (Expr b)
 
 data Visibility = Public | Private
   deriving (Show, Eq)
@@ -412,6 +414,11 @@ prettyExpr p (PrimIntEq _ e1 e2) =
       e2' = prettyExpr AtomPrec e2
    in parensIf (p > AppPrec) (text "#intEq" <+> e1' <+> e2')
 
+prettyExpr p (PrimStringEq _ e1 e2) =
+  let e1' = prettyExpr AtomPrec e1
+      e2' = prettyExpr AtomPrec e2
+   in parensIf (p > AppPrec) (text "#stringEq" <+> e1' <+> e2')
+
 prettyExpr p (PrimIfThenElse _ c t e) =
   let c' = prettyExpr AtomPrec c
       t' = prettyExpr AtomPrec t
@@ -422,6 +429,10 @@ prettyExpr p (PrimIntSub _ e1 e2) =
   let e1' = prettyExpr AtomPrec e1
       e2' = prettyExpr AtomPrec e2
    in parensIf (p > AppPrec) (text "#intSub" <+> e1' <+> e2')
+
+prettyExpr p (PrimExit _ e) =
+  let e' = prettyExpr AtomPrec e
+   in parensIf (p > AppPrec) (text "#exit" <+> e')
 
 data Block b = Block [Stmt b] (Expr b)
 
@@ -537,6 +548,11 @@ prettyExprWithTypes typeMap p (PrimIntEq _ e1 e2) =
       e2' = prettyExprWithTypes typeMap AtomPrec e2
    in parensIf (p > AppPrec) (text "#intEq" <+> e1' <+> e2')
 
+prettyExprWithTypes typeMap p (PrimStringEq _ e1 e2) =
+  let e1' = prettyExprWithTypes typeMap AtomPrec e1
+      e2' = prettyExprWithTypes typeMap AtomPrec e2
+   in parensIf (p > AppPrec) (text "#stringEq" <+> e1' <+> e2')
+
 prettyExprWithTypes typeMap p (PrimIfThenElse _ c t e) =
   let c' = prettyExprWithTypes typeMap AtomPrec c
       t' = prettyExprWithTypes typeMap AtomPrec t
@@ -547,6 +563,10 @@ prettyExprWithTypes typeMap p (PrimIntSub _ e1 e2) =
   let e1' = prettyExprWithTypes typeMap AtomPrec e1
       e2' = prettyExprWithTypes typeMap AtomPrec e2
    in parensIf (p > AppPrec) (text "#intSub" <+> e1' <+> e2')
+
+prettyExprWithTypes typeMap p (PrimExit _ e) =
+  let e' = prettyExprWithTypes typeMap AtomPrec e
+   in parensIf (p > AppPrec) (text "#exit" <+> e')
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =

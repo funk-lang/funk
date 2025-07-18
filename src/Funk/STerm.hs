@@ -336,8 +336,10 @@ typeOf = \case
   PrimApplyIO ty _ _ -> ty
   PrimBindIO ty _ _ -> ty
   PrimIntEq ty _ _ -> ty
+  PrimStringEq ty _ _ -> ty
   PrimIfThenElse ty _ _ _ -> ty
   PrimIntSub ty _ _ -> ty
+  PrimExit ty _ -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -419,8 +421,10 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     return $ PrimApplyIO () iof' iox'
   PrimBindIO _ iox f -> Funk.Term.PrimBindIO () <$> sExprToDisplayWithTypes iox <*> sExprToDisplayWithTypes f
   PrimIntEq _ e1 e2 -> Funk.Term.PrimIntEq () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
+  PrimStringEq _ e1 e2 -> Funk.Term.PrimStringEq () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
   PrimIfThenElse _ c t e -> Funk.Term.PrimIfThenElse () <$> sExprToDisplayWithTypes c <*> sExprToDisplayWithTypes t <*> sExprToDisplayWithTypes e
   PrimIntSub _ e1 e2 -> Funk.Term.PrimIntSub () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
+  PrimExit _ e -> Funk.Term.PrimExit () <$> sExprToDisplayWithTypes e
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)

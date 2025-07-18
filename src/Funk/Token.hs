@@ -63,8 +63,11 @@ data Token
   | TokApplyIO
   | TokBindIO
   | TokIntEq
+  | TokStringEq
+  | TokStringConcat
   | TokIfThenElse
   | TokIntSub
+  | TokExit
   deriving (Eq)
 
 instance Show Token where
@@ -115,8 +118,11 @@ instance Show Token where
     TokApplyIO -> "'#applyIO'"
     TokBindIO -> "'#bindIO'"
     TokIntEq -> "'#intEq'"
+    TokStringEq -> "'#stringEq'"
+    TokStringConcat -> "'#stringConcat'"
     TokIfThenElse -> "'#ifThenElse'"
     TokIntSub -> "'#intSub'"
+    TokExit -> "'#exit'"
 
 token :: Parser (Located Token)
 token = do
@@ -195,6 +201,9 @@ token = do
         "#intEq" -> TokIntEq
         "#ifThenElse" -> TokIfThenElse
         "#intSub" -> TokIntSub
+        "#stringEq" -> TokStringEq
+        "#stringConcat" -> TokStringConcat
+        "#exit" -> TokExit
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

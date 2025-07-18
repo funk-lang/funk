@@ -239,6 +239,11 @@ substExpr pexpr = case pexpr of
     e1' <- substExpr e1
     e2' <- substExpr e2
     return $ PrimIntEq iTy e1' e2'
+  PrimStringEq _ e1 e2 -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    e1' <- substExpr e1
+    e2' <- substExpr e2
+    return $ PrimStringEq iTy e1' e2'
   PrimIfThenElse _ c t e -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     c' <- substExpr c
@@ -250,6 +255,10 @@ substExpr pexpr = case pexpr of
     e1' <- substExpr e1
     e2' <- substExpr e2
     return $ PrimIntSub iTy e1' e2'
+  PrimExit _ e -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    e' <- substExpr e
+    return $ PrimExit iTy e'
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"
