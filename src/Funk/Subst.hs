@@ -97,6 +97,8 @@ substTy pty = case pty of
   TIO t -> TIO <$> substTy t
   TUnit -> return TUnit
   TString -> return TString
+  TInt -> return TInt
+  TBool -> return TBool
 
 extractPBinding :: PExpr -> PBinding
 extractPBinding (Var _ pbinding) = pbinding
@@ -185,6 +187,15 @@ substExpr pexpr = case pexpr of
   PrimString _ s -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     return $ PrimString iTy s
+  PrimInt _ i -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimInt iTy i
+  PrimTrue _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimTrue iTy
+  PrimFalse _ -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimFalse iTy
   PrimNil _ ty -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     ty' <- substTy ty
@@ -195,29 +206,47 @@ substExpr pexpr = case pexpr of
     head' <- substExpr headExpr
     tail' <- substExpr tailExpr
     return $ PrimCons iTy ty' head' tail'
-  PrimPrint _ expr -> do
+  PrimPrint _ e -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
-    expr' <- substExpr expr
-    return $ PrimPrint iTy expr'
-  PrimFmapIO _ f io -> do
+    e' <- substExpr e
+    return $ PrimPrint iTy e'
+  PrimPureIO _ e -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
-    f' <- substExpr f
-    io' <- substExpr io
-    return $ PrimFmapIO iTy f' io'
-  PrimPureIO _ expr -> do
-    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
-    expr' <- substExpr expr
-    return $ PrimPureIO iTy expr'
+    e' <- substExpr e
+    return $ PrimPureIO iTy e'
+
+
   PrimApplyIO _ iof iox -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     iof' <- substExpr iof
     iox' <- substExpr iox
     return $ PrimApplyIO iTy iof' iox'
+  PrimFmapIO _ f io -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    f' <- substExpr f
+    io' <- substExpr io
+    return $ PrimFmapIO iTy f' io'
   PrimBindIO _ iox f -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     iox' <- substExpr iox
     f' <- substExpr f
     return $ PrimBindIO iTy iox' f'
+  PrimIntEq _ e1 e2 -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    e1' <- substExpr e1
+    e2' <- substExpr e2
+    return $ PrimIntEq iTy e1' e2'
+  PrimIfThenElse _ c t e -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    c' <- substExpr c
+    t' <- substExpr t
+    e' <- substExpr e
+    return $ PrimIfThenElse iTy c' t' e'
+  PrimIntSub _ e1 e2 -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    e1' <- substExpr e1
+    e2' <- substExpr e2
+    return $ PrimIntSub iTy e1' e2'
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"

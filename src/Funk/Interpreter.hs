@@ -12,6 +12,7 @@ import Funk.Core
 data Value
   = VUnit
   | VString String
+  | VInt Int
   | VLam Var CoreType (CoreExpr, Env)
   | VTyLam TyVar (CoreExpr, Env)
   | VCon String [Value]
@@ -22,6 +23,7 @@ data Value
 instance Show Value where
   show VUnit = "()"
   show (VString s) = show s
+  show (VInt i) = show i
   show (VLam var ty _) = "λ" ++ show var ++ ":" ++ show ty ++ ". <closure>"
   show (VTyLam tyvar _) = "Λ" ++ show tyvar ++ ". <closure>"
   show (VCon name []) = name
@@ -98,6 +100,8 @@ substType tyvar replacement ty = case ty of
   TyApp t1 t2 -> TyApp (substType tyvar replacement t1) (substType tyvar replacement t2)
   TyUnit -> TyUnit
   TyString -> TyString
+  TyInt -> TyInt
+  TyBool -> TyBool
   TyList t -> TyList (substType tyvar replacement t)
   TyIO t -> TyIO (substType tyvar replacement t)
   TyCon name -> TyCon name
@@ -120,7 +124,13 @@ eval = \case
     applyType exprVal ty
   CoreLet var val body -> do
     valResult <- eval val
-    withVar var valResult (eval body)
+    -- For lambda values, create a recursive binding using a fixpoint
+    let updatedVal = case valResult of
+          VLam lamVar ty (lamBody, closure) -> 
+            let recursiveVal = VLam lamVar ty (lamBody, Map.insert var recursiveVal closure)
+            in recursiveVal
+          _ -> valResult
+    withVar var updatedVal (eval body)
   CoreCase scrut alts -> do
     scrutVal <- eval scrut
     evalCase scrutVal alts
@@ -129,6 +139,9 @@ eval = \case
     return $ VCon name argVals
   CoreUnit -> return VUnit
   CoreString s -> return $ VString s
+  CoreInt i -> return $ VInt i
+  CoreTrue -> return $ VCon "True" []
+  CoreFalse -> return $ VCon "False" []
   CoreNil _ty -> return $ VList []
   CoreCons _ty headExpr tailExpr -> do
     headVal <- eval headExpr
@@ -156,16 +169,18 @@ eval = \case
   CoreReturn expr -> do
     val <- eval expr
     return $ VIO (return val)
-  CoreBind expr1 _expr2 -> do
+  CoreBind expr1 expr2 -> do
     val1 <- eval expr1
-    case val1 of
-      VIO io1 -> do
+    val2 <- eval expr2
+    case (val1, val2) of
+      (VIO io1, VLam var _ty (body, closure)) -> do
         return $ VIO $ do
           result1 <- io1
-          case result1 of
-            VIO innerIO -> innerIO
-            _ -> error "Type error: bind expects IO action"
-      _ -> throwError "Type error: bind expects IO action"
+          case runInterpreterWithEnv (Map.insert var result1 closure) Map.empty body of
+            Left err -> error $ "bind error: " ++ err
+            Right (VIO nextAction) -> nextAction
+            Right val -> return val
+      _ -> throwError "Type error: bind expects IO action and function"
   CorePrint expr -> do
     val <- eval expr
     return $ VIO $ do
@@ -212,6 +227,27 @@ eval = \case
             Right (VIO nextAction) -> nextAction
             Right val -> return val
       _ -> throwError "Type error: bindIO expects IO action and function"
+
+  CoreIntEq e1 e2 -> do
+    v1 <- eval e1
+    v2 <- eval e2
+    case (v1, v2) of
+      (VInt i1, VInt i2) -> return $ if i1 == i2 then VCon "True" [] else VCon "False" []
+      _ -> throwError "Type error: intEq expects two integers"
+
+  CoreIfThenElse c t e -> do
+    v <- eval c
+    case v of
+      VCon "True" [] -> eval t
+      VCon "False" [] -> eval e
+      _ -> throwError "Type error: if condition must be a boolean"
+
+  CoreIntSub e1 e2 -> do
+    v1 <- eval e1
+    v2 <- eval e2
+    case (v1, v2) of
+      (VInt i1, VInt i2) -> return $ VInt (i1 - i2)
+      _ -> throwError "Type error: intSub expects two integers"
 
 applyFunction :: Value -> Value -> Interp Value
 applyFunction funcVal argVal = case funcVal of
@@ -292,6 +328,7 @@ prettyValue :: Value -> String
 prettyValue = \case
   VUnit -> "()"
   VString s -> s
+  VInt i -> show i
   VLam var ty _ -> "λ" ++ show var ++ ":" ++ show ty ++ ". <closure>"
   VTyLam tyvar _ -> "Λ" ++ show tyvar ++ ". <closure>"
   VCon name [] -> name

@@ -63,6 +63,12 @@ unitType = tok TokUnit $> TUnit
 stringType :: Parser PType
 stringType = tok TokStringType $> TString
 
+intType :: Parser PType
+intType = tok TokIntType $> TInt
+
+boolType :: Parser PType
+boolType = tok TokBoolType $> TBool
+
 parensType :: Parser PType
 parensType = tok TokLParen *> typeExpr <* tok TokRParen
 
@@ -81,6 +87,8 @@ atomicType =
       listType,
       unitType,
       stringType,
+      intType,
+      boolType,
       typeVar,
       parensType
     ]
@@ -144,6 +152,21 @@ primStringExpr = do
     testTok _ = Nothing
     updatePos _ (Located pos _) _ = pos
 
+primIntExpr :: Parser PExpr
+primIntExpr = do
+  Located _ (TokInt i) <- tokenPrim show updatePos testTok <?> "integer literal"
+  return $ PrimInt () i
+  where
+    testTok (Located _ (TokInt i)) = Just (Located undefined (TokInt i))
+    testTok _ = Nothing
+    updatePos _ (Located pos _) _ = pos
+
+primTrueExpr :: Parser PExpr
+primTrueExpr = tok TokTrue $> PrimTrue ()
+
+primFalseExpr :: Parser PExpr
+primFalseExpr = tok TokFalse $> PrimFalse ()
+
 primNilExpr :: Parser PExpr
 primNilExpr = do
   tok TokNil
@@ -192,6 +215,28 @@ primBindIOExpr = do
   f <- atomicExpr
   return $ PrimBindIO () iox f
 
+primIntEqExpr :: Parser PExpr
+primIntEqExpr = do
+  tok TokIntEq
+  e1 <- atomicExpr
+  e2 <- atomicExpr
+  return $ PrimIntEq () e1 e2
+
+primIfThenElseExpr :: Parser PExpr
+primIfThenElseExpr = do
+  _ <- tok TokIfThenElse
+  c <- atomicExpr
+  t <- atomicExpr
+  e <- atomicExpr
+  return $ PrimIfThenElse () c t e
+
+primIntSubExpr :: Parser PExpr
+primIntSubExpr = do
+  _ <- tok TokIntSub
+  e1 <- atomicExpr
+  e2 <- atomicExpr
+  return $ PrimIntSub () e1 e2
+
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
 
@@ -239,8 +284,7 @@ recordCreationExprDebug = do
       )
       (tok TokComma <?> "comma between fields")
   tok TokRBrace <?> "closing brace"
-  let constructorExpr = Var () (PBinding constructorName)
-  return $ RecordCreation () constructorExpr fields
+  return $ RecordCreation () (Var () (PBinding constructorName)) fields
 
 atomicExpr :: Parser PExpr
 atomicExpr =
@@ -248,6 +292,9 @@ atomicExpr =
     [ try recordCreationExpr,
       primUnitExpr,
       primStringExpr,
+      primIntExpr,
+      primTrueExpr,
+      primFalseExpr,
       primNilExpr,
       primConsExpr,
       primPrintExpr,
@@ -255,6 +302,7 @@ atomicExpr =
       primPureIOExpr,
       primApplyIOExpr,
       primBindIOExpr,
+      primIntEqExpr,
       varExpr,
       parensExpr,
       try blockExpr
@@ -408,8 +456,7 @@ recordCreationExpr = do
       )
       (tok TokComma)
   tok TokRBrace
-  let constructorExpr = Var () (PBinding constructorName)
-  return $ RecordCreation () constructorExpr fields
+  return $ RecordCreation () (Var () (PBinding constructorName)) fields
 
 recordCreationExpr' :: Parser PExpr
 recordCreationExpr' = do
@@ -417,8 +464,7 @@ recordCreationExpr' = do
   tok TokLBrace
   fields <- fieldList
   tok TokRBrace
-  let constructorExpr = Var () (PBinding constructorName)
-  return $ RecordCreation () constructorExpr fields
+  return $ RecordCreation () (Var () (PBinding constructorName)) fields
   where
     fieldList = sepBy fieldAssignment (tok TokComma)
     fieldAssignment = do
@@ -440,11 +486,13 @@ expr :: Parser PExpr
 expr =
   choice
     [ try lambdaExpr,
+      try primIfThenElseExpr,
+      try primIntSubExpr,
       appExpr
     ]
 
 parseTopLevel :: [Located Token] -> Either ParseError PBlock
-parseTopLevel = parse (topLevelBlock <* eof) "<input>"
+parseTopLevel = parse (topLevelBlock <* eof) ""
   where
     topLevelBlock = do
       stmts <- many (try stmt)

@@ -46,7 +46,7 @@ run = do
           case result of
             Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
             Right VUnit -> return () -- Don't print unit results from IO actions
-            Right result -> putStrLn $ prettyValue result
+            Right resultVal -> putStrLn $ prettyValue resultVal
         else do
           -- Output the pretty-printed resolved AST with proper type resolution
           resolvedBlock <- sBlockToDisplayWithTypes block

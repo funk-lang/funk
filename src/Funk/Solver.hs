@@ -42,6 +42,8 @@ prune (TList t) = TList <$> prune t
 prune (TIO t) = TIO <$> prune t
 prune TUnit = return TUnit
 prune TString = return TString
+prune TInt = return TInt
+prune TBool = return TBool
 prune (TConstraint traitName typeVars targetType bodyType) = do
   targetType' <- prune targetType
   bodyType' <- prune bodyType
@@ -92,6 +94,8 @@ unify t1 t2 = do
     (TIO a, TIO b) -> unify a b
     (TUnit, TUnit) -> return ()
     (TString, TString) -> return ()
+    (TInt, TInt) -> return ()
+    (TBool, TBool) -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
       fresh <- freshUnboundTyS pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
@@ -154,6 +158,8 @@ substituteTypeVar old new ty = case ty of
   TIO t -> TIO (substituteTypeVar old new t)
   TUnit -> TUnit
   TString -> TString
+  TInt -> TInt
+  TBool -> TBool
 
 bindVar :: STBinding -> SType -> Solver ()
 bindVar v ty = do
@@ -179,6 +185,8 @@ occursCheck v t = do
     TIO t1 -> occursCheck v t1
     TUnit -> return False
     TString -> return False
+    TInt -> return False
+    TBool -> return False
 
 solveTrait :: STBinding -> [STBinding] -> SType -> Solver ()
 solveTrait traitName typeArgs targetType = do
@@ -280,6 +288,8 @@ tryUnify envRef t1 t2 = do
     (TIO t1a, TIO t2a) -> tryUnify envRef t1a t2a
     (TUnit, TUnit) -> return $ Right ()
     (TString, TString) -> return $ Right ()
+    (TInt, TInt) -> return $ Right ()
+    (TBool, TBool) -> return $ Right ()
     _ -> return $ Left "type mismatch"
 
 substAndPrune :: IORef UnificationEnv -> SType -> IO SType
@@ -305,6 +315,8 @@ substAndPrune envRef ty = do
     TIO t -> TIO <$> substAndPrune envRef t
     TUnit -> return TUnit
     TString -> return TString
+    TInt -> return TInt
+    TBool -> return TBool
 
 occursCheckIO :: STBinding -> SType -> IO Bool
 occursCheckIO var ty = case ty of
@@ -328,6 +340,8 @@ occursCheckIO var ty = case ty of
   TIO t -> occursCheckIO var t
   TUnit -> return False
   TString -> return False
+  TInt -> return False
+  TBool -> return False
 
 solveConstraints :: [Constraint] -> S.Env -> IO (Either [SError] ())
 solveConstraints cs env = do

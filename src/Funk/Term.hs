@@ -25,6 +25,8 @@ data Type b
   | TIO (Type b)
   | TUnit
   | TString
+  | TInt
+  | TBool
   deriving (Show, Eq)
 
 data Kind b
@@ -70,6 +72,8 @@ prettyType p (TIO t) =
    in parensIf (p > AtomPrec) (text "#IO" <+> s)
 prettyType _ TUnit = text "#Unit"
 prettyType _ TString = text "#String"
+prettyType _ TInt = text "#Int"
+prettyType _ TBool = text "#Bool"
 
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
@@ -123,6 +127,9 @@ data Expr b
   | TraitMethod (BApp b) (BTVar b) [Type (BTVar b)] (Type (BTVar b)) Ident
   | PrimUnit (BVar b)
   | PrimString (BVar b) String
+  | PrimInt (BVar b) Int
+  | PrimTrue (BVar b)
+  | PrimFalse (BVar b)
   | PrimNil (BVar b) (Type (BTVar b))
   | PrimCons (BVar b) (Type (BTVar b)) (Expr b) (Expr b)
   | PrimPrint (BVar b) (Expr b)
@@ -130,6 +137,9 @@ data Expr b
   | PrimPureIO (BVar b) (Expr b)
   | PrimApplyIO (BVar b) (Expr b) (Expr b)
   | PrimBindIO (BVar b) (Expr b) (Expr b)
+  | PrimIntEq (BVar b) (Expr b) (Expr b)
+  | PrimIfThenElse (BVar b) (Expr b) (Expr b) (Expr b)
+  | PrimIntSub (BVar b) (Expr b) (Expr b)
 
 data Stmt b
   = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
@@ -264,6 +274,9 @@ prettyExpr p (TraitMethod _ traitName _ targetType methodName) =
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExpr _ (PrimUnit _) = text "#Unit"
 prettyExpr _ (PrimString _ s) = doubleQuotes (text s)
+prettyExpr _ (PrimInt _ i) = int i
+prettyExpr _ (PrimTrue _) = text "#true"
+prettyExpr _ (PrimFalse _) = text "#false"
 prettyExpr _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
 prettyExpr p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExpr AtomPrec headExpr
@@ -287,6 +300,22 @@ prettyExpr p (PrimBindIO _ iox f) =
   let iox' = prettyExpr AtomPrec iox
       f' = prettyExpr AtomPrec f
    in parensIf (p > AppPrec) (text "#bindIO" <+> iox' <+> f')
+
+prettyExpr p (PrimIntEq _ e1 e2) =
+  let e1' = prettyExpr AtomPrec e1
+      e2' = prettyExpr AtomPrec e2
+   in parensIf (p > AppPrec) (text "#intEq" <+> e1' <+> e2')
+
+prettyExpr p (PrimIfThenElse _ c t e) =
+  let c' = prettyExpr AtomPrec c
+      t' = prettyExpr AtomPrec t
+      e' = prettyExpr AtomPrec e
+   in parensIf (p > AppPrec) (text "#if" <+> c' <+> text "then" <+> t' <+> text "else" <+> e')
+
+prettyExpr p (PrimIntSub _ e1 e2) =
+  let e1' = prettyExpr AtomPrec e1
+      e2' = prettyExpr AtomPrec e2
+   in parensIf (p > AppPrec) (text "#intSub" <+> e1' <+> e2')
 
 data Block b = Block [Stmt b] (Expr b)
 
@@ -355,6 +384,9 @@ prettyExprWithTypes _ p (TraitMethod _ traitName _ targetType methodName) =
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExprWithTypes _ _ (PrimUnit _) = text "#Unit"
 prettyExprWithTypes _ _ (PrimString _ s) = doubleQuotes (text s)
+prettyExprWithTypes _ _ (PrimInt _ i) = int i
+prettyExprWithTypes _ _ (PrimTrue _) = text "#true"
+prettyExprWithTypes _ _ (PrimFalse _) = text "#false"
 prettyExprWithTypes _ _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
 prettyExprWithTypes typeMap p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExprWithTypes typeMap AtomPrec headExpr
@@ -378,6 +410,22 @@ prettyExprWithTypes typeMap p (PrimBindIO _ iox f) =
   let iox' = prettyExprWithTypes typeMap AtomPrec iox
       f' = prettyExprWithTypes typeMap AtomPrec f
    in parensIf (p > AppPrec) (text "#bindIO" <+> iox' <+> f')
+
+prettyExprWithTypes typeMap p (PrimIntEq _ e1 e2) =
+  let e1' = prettyExprWithTypes typeMap AtomPrec e1
+      e2' = prettyExprWithTypes typeMap AtomPrec e2
+   in parensIf (p > AppPrec) (text "#intEq" <+> e1' <+> e2')
+
+prettyExprWithTypes typeMap p (PrimIfThenElse _ c t e) =
+  let c' = prettyExprWithTypes typeMap AtomPrec c
+      t' = prettyExprWithTypes typeMap AtomPrec t
+      e' = prettyExprWithTypes typeMap AtomPrec e
+   in parensIf (p > AppPrec) (text "#if" <+> c' <+> text "then" <+> t' <+> text "else" <+> e')
+
+prettyExprWithTypes typeMap p (PrimIntSub _ e1 e2) =
+  let e1' = prettyExprWithTypes typeMap AtomPrec e1
+      e2' = prettyExprWithTypes typeMap AtomPrec e2
+   in parensIf (p > AppPrec) (text "#intSub" <+> e1' <+> e2')
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =

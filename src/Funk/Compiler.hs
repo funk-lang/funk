@@ -77,6 +77,8 @@ compileType = \case
   Term.TApp t1 t2 -> TyApp <$> compileType t1 <*> compileType t2
   Term.TUnit -> return TyUnit
   Term.TString -> return TyString
+  Term.TInt -> return TyInt
+  Term.TBool -> return TyBool
   Term.TList t -> TyList <$> compileType t
   Term.TIO t -> TyIO <$> compileType t
   Term.TConstraint _traitName _typeVars targetType _bodyType -> do
@@ -157,6 +159,12 @@ compileResolvedExpr = \case
   
   Term.PrimString _ s -> return $ CoreString s
   
+  Term.PrimInt _ i -> return $ CoreInt i
+  
+  Term.PrimTrue _ -> return CoreTrue
+  
+  Term.PrimFalse _ -> return CoreFalse
+  
   Term.PrimNil _ ty -> do
     coreType <- compileType ty
     return $ CoreNil coreType
@@ -201,6 +209,22 @@ compileResolvedExpr = \case
     coreIOX <- compileResolvedExpr iox
     coreF <- compileResolvedExpr f
     return $ CoreBindIO coreIOX coreF
+
+  Term.PrimIntEq _ e1 e2 -> do
+    coreE1 <- compileResolvedExpr e1
+    coreE2 <- compileResolvedExpr e2
+    return $ CoreIntEq coreE1 coreE2
+
+  Term.PrimIfThenElse _ c t e -> do
+    coreC <- compileResolvedExpr c
+    coreT <- compileResolvedExpr t
+    coreE <- compileResolvedExpr e
+    return $ CoreIfThenElse coreC coreT coreE
+
+  Term.PrimIntSub _ e1 e2 -> do
+    coreE1 <- compileResolvedExpr e1
+    coreE2 <- compileResolvedExpr e2
+    return $ CoreIntSub coreE1 coreE2
 
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr

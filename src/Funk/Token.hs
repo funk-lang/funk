@@ -19,6 +19,9 @@ instance (Show a) => Show (Located a) where
 data Token
   = TokIdent String
   | TokString String
+  | TokInt Int
+  | TokTrue
+  | TokFalse
   | TokLambda
   | TokForall
   | TokArrow
@@ -47,6 +50,8 @@ data Token
   | TokList
   | TokUnit
   | TokStringType
+  | TokIntType
+  | TokBoolType
   | TokNil
   | TokCons
   | TokPrint
@@ -54,12 +59,16 @@ data Token
   | TokPureIO
   | TokApplyIO
   | TokBindIO
+  | TokIntEq
+  | TokIfThenElse
+  | TokIntSub
   deriving (Eq)
 
 instance Show Token where
   show = \case
     TokIdent _ -> "identifier"
     TokString _ -> "string literal"
+    TokInt _ -> "integer literal"
     TokLambda -> "'\\'"
     TokForall -> "'forall'"
     TokArrow -> "'->'"
@@ -88,6 +97,10 @@ instance Show Token where
     TokList -> "'#List'"
     TokUnit -> "'#Unit'"
     TokStringType -> "'#String'"
+    TokIntType -> "'#Int'"
+    TokBoolType -> "'#Bool'"
+    TokTrue -> "'#true'"
+    TokFalse -> "'#false'"
     TokNil -> "'#nil'"
     TokCons -> "'#cons'"
     TokPrint -> "'#print'"
@@ -95,6 +108,9 @@ instance Show Token where
     TokPureIO -> "'#pureIO'"
     TokApplyIO -> "'#applyIO'"
     TokBindIO -> "'#bindIO'"
+    TokIntEq -> "'#intEq'"
+    TokIfThenElse -> "'#ifThenElse'"
+    TokIntSub -> "'#intSub'"
 
 token :: Parser (Located Token)
 token = do
@@ -119,14 +135,15 @@ token = do
         TokComma <$ char ',',
         TokAt <$ char '@',
         stringToken,
+        intToken,
         identToken
       ]
   return $ Located pos t
   where
     stringToken = do
-      char '"'
+      _ <- char '"'
       chars <- many stringChar
-      char '"'
+      _ <- char '"'
       return $ TokString chars
     stringChar = 
       (char '\\' >> escapeChar) <|> noneOf "\""
@@ -137,6 +154,9 @@ token = do
       , char '\\' >> return '\\'
       , char '"' >> return '"'
       ]
+    intToken = do
+      digits <- many1 digit
+      return $ TokInt (read digits)
     identToken = do
       c <- letter <|> char '_' <|> char '#'
       cs <- many (alphaNum <|> char '_')
@@ -152,6 +172,10 @@ token = do
         "#List" -> TokList
         "#Unit" -> TokUnit
         "#String" -> TokStringType
+        "#Int" -> TokIntType
+        "#Bool" -> TokBoolType
+        "#true" -> TokTrue
+        "#false" -> TokFalse
         "#nil" -> TokNil
         "#cons" -> TokCons
         "#print" -> TokPrint
@@ -159,6 +183,9 @@ token = do
         "#pureIO" -> TokPureIO
         "#applyIO" -> TokApplyIO
         "#bindIO" -> TokBindIO
+        "#intEq" -> TokIntEq
+        "#ifThenElse" -> TokIfThenElse
+        "#intSub" -> TokIntSub
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

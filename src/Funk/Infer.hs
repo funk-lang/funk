@@ -139,6 +139,15 @@ constraintsExpr = \case
   PrimString ty _s -> do
     -- string literals have type #String
     return [CEq (TVar ty) TString]
+  PrimInt ty _i -> do
+    -- integer literals have type #Int
+    return [CEq (TVar ty) TInt]
+  PrimTrue ty -> do
+    -- #true has type #Bool
+    return [CEq (TVar ty) TBool]
+  PrimFalse ty -> do
+    -- #false has type #Bool
+    return [CEq (TVar ty) TBool]
   PrimNil ty elemTy -> do
     -- #nil[T] has type #List T
     return [CEq (TVar ty) (TList elemTy)]
@@ -189,6 +198,34 @@ constraintsExpr = \case
                CEq (TVar (typeOf iox)) (TIO (TVar aType)),
                CEq (TVar (typeOf f)) (TArrow (TVar aType) (TIO (TVar bType)))
              ] ++ csIOX ++ csF
+
+  PrimIntEq ty e1 e2 -> do
+    -- #intEq e1 e2 has type #Bool, where e1 and e2 have type #Int
+    cs1 <- constraintsExpr e1
+    cs2 <- constraintsExpr e2
+    return $ [ CEq (TVar ty) TBool,
+               CEq (TVar (typeOf e1)) TInt,
+               CEq (TVar (typeOf e2)) TInt
+             ] ++ cs1 ++ cs2
+
+  PrimIfThenElse ty c t e -> do
+    -- #if c then t else e has type a, where c has type #Bool and t and e have type a
+    csC <- constraintsExpr c
+    csT <- constraintsExpr t
+    csE <- constraintsExpr e
+    return $ [ CEq (TVar (typeOf c)) TBool,
+               CEq (TVar (typeOf t)) (TVar (typeOf e)),
+               CEq (TVar ty) (TVar (typeOf t))
+             ] ++ csC ++ csT ++ csE
+
+  PrimIntSub ty e1 e2 -> do
+    -- #intSub e1 e2 has type #Int, where e1 and e2 have type #Int
+    cs1 <- constraintsExpr e1
+    cs2 <- constraintsExpr e2
+    return $ [ CEq (TVar ty) TInt,
+               CEq (TVar (typeOf e1)) TInt,
+               CEq (TVar (typeOf e2)) TInt
+             ] ++ cs1 ++ cs2
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do

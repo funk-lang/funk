@@ -54,6 +54,8 @@ typePos (TList t) = typePos t
 typePos (TIO t) = typePos t
 typePos TUnit = return (Pos.newPos "" 1 1)
 typePos TString = return (Pos.newPos "" 1 1)
+typePos TInt = return (Pos.newPos "" 1 1)
+typePos TBool = return (Pos.newPos "" 1 1)
 
 
 data Var = VBound SExpr | VUnbound (Located Ident)
@@ -322,6 +324,9 @@ typeOf = \case
   TraitMethod ty _ _ _ _ -> ty
   PrimUnit ty -> ty
   PrimString ty _s -> ty
+  PrimInt ty _i -> ty
+  PrimTrue ty -> ty
+  PrimFalse ty -> ty
   PrimNil ty _ -> ty
   PrimCons ty _ _ _ -> ty
   PrimPrint ty _ -> ty
@@ -329,6 +334,9 @@ typeOf = \case
   PrimPureIO ty _ -> ty
   PrimApplyIO ty _ _ -> ty
   PrimBindIO ty _ _ -> ty
+  PrimIntEq ty _ _ -> ty
+  PrimIfThenElse ty _ _ _ -> ty
+  PrimIntSub ty _ _ -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -379,6 +387,9 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     return $ TraitMethod () traitName' typeArgs' targetType' methodName
   PrimUnit _ -> return $ PrimUnit ()
   PrimString _ s -> return $ PrimString () s
+  PrimInt _ i -> return $ PrimInt () i
+  PrimTrue _ -> return $ PrimTrue ()
+  PrimFalse _ -> return $ PrimFalse ()
   PrimNil _ ty -> do
     ty' <- sTypeToDisplay ty
     return $ PrimNil () ty'
@@ -401,10 +412,10 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     iof' <- sExprToDisplayWithTypes iof
     iox' <- sExprToDisplayWithTypes iox
     return $ PrimApplyIO () iof' iox'
-  PrimBindIO _ iox f -> do
-    iox' <- sExprToDisplayWithTypes iox
-    f' <- sExprToDisplayWithTypes f
-    return $ PrimBindIO () iox' f'
+  PrimBindIO _ iox f -> Funk.Term.PrimBindIO () <$> sExprToDisplayWithTypes iox <*> sExprToDisplayWithTypes f
+  PrimIntEq _ e1 e2 -> Funk.Term.PrimIntEq () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
+  PrimIfThenElse _ c t e -> Funk.Term.PrimIfThenElse () <$> sExprToDisplayWithTypes c <*> sExprToDisplayWithTypes t <*> sExprToDisplayWithTypes e
+  PrimIntSub _ e1 e2 -> Funk.Term.PrimIntSub () <$> sExprToDisplayWithTypes e1 <*> sExprToDisplayWithTypes e2
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)
@@ -458,6 +469,8 @@ sTypeToDisplay = sTypeToDisplayHelper []
         return $ TIO t'
       TUnit -> return TUnit
       TString -> return TString
+      TInt -> return TInt
+      TBool -> return TBool
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
@@ -548,7 +561,7 @@ globalTraitMethodResolution (Block stmts expr) = do
     
     -- Resolve lambda with expected type to get proper parameter type annotations
     resolveLambdaWithExpectedType :: Expr Ident -> Type Ident -> IO (Expr Ident)
-    resolveLambdaWithExpectedType expr expectedType = case expr of
+    resolveLambdaWithExpectedType lamExpr expectedType = case lamExpr of
       Lam _ param _mty body -> do
         let expectedType' = case expectedType of
               -- Strip forall to get to the arrow type

@@ -23,6 +23,8 @@ data CoreType
   | TyApp CoreType CoreType              -- Type application
   | TyUnit                               -- Unit type
   | TyString                             -- String type
+  | TyInt                                -- Int type
+  | TyBool                               -- Bool type
   | TyList CoreType                      -- List type
   | TyIO CoreType                        -- IO type
   | TyCon String                         -- Type constructors (State, etc.)
@@ -40,6 +42,9 @@ data CoreExpr
   | CoreCon String [CoreExpr]            -- Constructor applications
   | CoreUnit                             -- Unit value
   | CoreString String                    -- String literal
+  | CoreInt Int                          -- Integer literal
+  | CoreTrue                             -- True literal
+  | CoreFalse                            -- False literal
   | CoreNil CoreType                     -- Empty list
   | CoreCons CoreType CoreExpr CoreExpr  -- List constructor
   | CoreDict String CoreType [CoreExpr]  -- Dictionary construction
@@ -51,6 +56,9 @@ data CoreExpr
   | CorePureIO CoreExpr                  -- Primitive pure for IO
   | CoreApplyIO CoreExpr CoreExpr        -- Primitive apply for IO
   | CoreBindIO CoreExpr CoreExpr         -- Primitive bind for IO
+  | CoreIntEq CoreExpr CoreExpr          -- Primitive int equality
+  | CoreIfThenElse CoreExpr CoreExpr CoreExpr -- Primitive if/then/else
+  | CoreIntSub CoreExpr CoreExpr         -- Primitive integer subtraction
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -93,6 +101,8 @@ prettyCoreType p (TyApp t1 t2) =
   in parensIf (p > 0) (s1 <+> s2)
 prettyCoreType _ TyUnit = text "Unit"
 prettyCoreType _ TyString = text "String"
+prettyCoreType _ TyInt = text "Int"
+prettyCoreType _ TyBool = text "Bool"
 prettyCoreType p (TyList t) =
   let t' = prettyCoreType (p+1) t
   in parensIf (p > 0) (text "List" <+> t')
@@ -138,6 +148,9 @@ prettyCoreExpr p (CoreCon name args) =
   in parensIf (p > 0 && not (null args)) (text name <+> hsep args')
 prettyCoreExpr _ CoreUnit = text "()"
 prettyCoreExpr _ (CoreString s) = doubleQuotes (text s)
+prettyCoreExpr _ (CoreInt i) = int i
+prettyCoreExpr _ CoreTrue = text "True"
+prettyCoreExpr _ CoreFalse = text "False"
 prettyCoreExpr p (CoreNil ty) =
   let ty' = prettyCoreType 0 ty
   in parensIf (p > 0) ((text "[]" <> text "@") <> ty')
@@ -180,6 +193,22 @@ prettyCoreExpr p (CoreBindIO iox f) =
   let iox' = prettyCoreExpr (p+1) iox
       f' = prettyCoreExpr (p+1) f
   in parensIf (p > 0) (text "bindIO" <+> iox' <+> f')
+
+prettyCoreExpr p (CoreIntEq e1 e2) =
+  let e1' = prettyCoreExpr (p+1) e1
+      e2' = prettyCoreExpr (p+1) e2
+  in parensIf (p > 0) (text "intEq" <+> e1' <+> e2')
+
+prettyCoreExpr p (CoreIfThenElse c t e) =
+  let c' = prettyCoreExpr (p+1) c
+      t' = prettyCoreExpr (p+1) t
+      e' = prettyCoreExpr (p+1) e
+  in parensIf (p > 0) (text "if" <+> c' <+> text "then" <+> t' <+> text "else" <+> e')
+
+prettyCoreExpr p (CoreIntSub e1 e2) =
+  let e1' = prettyCoreExpr (p+1) e1
+      e2' = prettyCoreExpr (p+1) e2
+  in parensIf (p > 0) (text "intSub" <+> e1' <+> e2')
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =
