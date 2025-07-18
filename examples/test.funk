@@ -42,4 +42,3 @@ let void: forall f . Functor f => f a -> f #Unit = fmap (const #Unit);
 
 let result: State #Unit #Unit = void (pure #Unit);
 let main = #print result;
-main

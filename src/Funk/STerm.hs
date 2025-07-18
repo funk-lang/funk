@@ -325,6 +325,10 @@ typeOf = \case
   PrimNil ty _ -> ty
   PrimCons ty _ _ _ -> ty
   PrimPrint ty _ -> ty
+  PrimFmapIO ty _ _ -> ty
+  PrimPureIO ty _ -> ty
+  PrimApplyIO ty _ _ -> ty
+  PrimBindIO ty _ _ -> ty
 
 -- Enhanced version that includes type information for display
 sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
@@ -386,6 +390,21 @@ sExprToDisplayWithTypes sexpr = case sexpr of
   PrimPrint _ expr -> do
     expr' <- sExprToDisplayWithTypes expr
     return $ PrimPrint () expr'
+  PrimFmapIO _ f io -> do
+    f' <- sExprToDisplayWithTypes f
+    io' <- sExprToDisplayWithTypes io
+    return $ PrimFmapIO () f' io'
+  PrimPureIO _ expr -> do
+    expr' <- sExprToDisplayWithTypes expr
+    return $ PrimPureIO () expr'
+  PrimApplyIO _ iof iox -> do
+    iof' <- sExprToDisplayWithTypes iof
+    iox' <- sExprToDisplayWithTypes iox
+    return $ PrimApplyIO () iof' iox'
+  PrimBindIO _ iox f -> do
+    iox' <- sExprToDisplayWithTypes iox
+    f' <- sExprToDisplayWithTypes f
+    return $ PrimBindIO () iox' f'
 
 -- Original version for backward compatibility
 sExprToDisplay :: SExpr -> IO (Expr Ident)

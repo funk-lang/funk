@@ -1,2 +1,0 @@
-let const: forall a b . a -> b -> a = \a _ -> a;
-let main = #print (const #Unit #Unit);

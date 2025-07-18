@@ -50,6 +50,10 @@ data Token
   | TokNil
   | TokCons
   | TokPrint
+  | TokFmapIO
+  | TokPureIO
+  | TokApplyIO
+  | TokBindIO
   deriving (Eq)
 
 instance Show Token where
@@ -87,6 +91,10 @@ instance Show Token where
     TokNil -> "'#nil'"
     TokCons -> "'#cons'"
     TokPrint -> "'#print'"
+    TokFmapIO -> "'#fmapIO'"
+    TokPureIO -> "'#pureIO'"
+    TokApplyIO -> "'#applyIO'"
+    TokBindIO -> "'#bindIO'"
 
 token :: Parser (Located Token)
 token = do
@@ -147,6 +155,10 @@ token = do
         "#nil" -> TokNil
         "#cons" -> TokCons
         "#print" -> TokPrint
+        "#fmapIO" -> TokFmapIO
+        "#pureIO" -> TokPureIO
+        "#applyIO" -> TokApplyIO
+        "#bindIO" -> TokBindIO
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]

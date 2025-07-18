@@ -126,6 +126,10 @@ data Expr b
   | PrimNil (BVar b) (Type (BTVar b))
   | PrimCons (BVar b) (Type (BTVar b)) (Expr b) (Expr b)
   | PrimPrint (BVar b) (Expr b)
+  | PrimFmapIO (BVar b) (Expr b) (Expr b)
+  | PrimPureIO (BVar b) (Expr b)
+  | PrimApplyIO (BVar b) (Expr b) (Expr b)
+  | PrimBindIO (BVar b) (Expr b) (Expr b)
 
 data Stmt b
   = Let (BLet b) b (Maybe (Type (BTVar b))) (Expr b)
@@ -268,6 +272,21 @@ prettyExpr p (PrimCons _ ty headExpr tailExpr) =
 prettyExpr p (PrimPrint _ expr) =
   let exprDoc = prettyExpr AtomPrec expr
    in parensIf (p > AppPrec) (text "#print" <+> exprDoc)
+prettyExpr p (PrimFmapIO _ f io) =
+  let f' = prettyExpr AtomPrec f
+      io' = prettyExpr AtomPrec io
+   in parensIf (p > AppPrec) (text "#fmapIO" <+> f' <+> io')
+prettyExpr p (PrimPureIO _ expr) =
+  let expr' = prettyExpr AtomPrec expr
+   in parensIf (p > AppPrec) (text "#pureIO" <+> expr')
+prettyExpr p (PrimApplyIO _ iof iox) =
+  let iof' = prettyExpr AtomPrec iof
+      iox' = prettyExpr AtomPrec iox
+   in parensIf (p > AppPrec) (text "#applyIO" <+> iof' <+> iox')
+prettyExpr p (PrimBindIO _ iox f) =
+  let iox' = prettyExpr AtomPrec iox
+      f' = prettyExpr AtomPrec f
+   in parensIf (p > AppPrec) (text "#bindIO" <+> iox' <+> f')
 
 data Block b = Block [Stmt b] (Expr b)
 
@@ -344,6 +363,21 @@ prettyExprWithTypes typeMap p (PrimCons _ ty headExpr tailExpr) =
 prettyExprWithTypes typeMap p (PrimPrint _ expr) =
   let exprDoc = prettyExprWithTypes typeMap AtomPrec expr
    in parensIf (p > AppPrec) (text "#print" <+> exprDoc)
+prettyExprWithTypes typeMap p (PrimFmapIO _ f io) =
+  let f' = prettyExprWithTypes typeMap AtomPrec f
+      io' = prettyExprWithTypes typeMap AtomPrec io
+   in parensIf (p > AppPrec) (text "#fmapIO" <+> f' <+> io')
+prettyExprWithTypes typeMap p (PrimPureIO _ expr) =
+  let expr' = prettyExprWithTypes typeMap AtomPrec expr
+   in parensIf (p > AppPrec) (text "#pureIO" <+> expr')
+prettyExprWithTypes typeMap p (PrimApplyIO _ iof iox) =
+  let iof' = prettyExprWithTypes typeMap AtomPrec iof
+      iox' = prettyExprWithTypes typeMap AtomPrec iox
+   in parensIf (p > AppPrec) (text "#applyIO" <+> iof' <+> iox')
+prettyExprWithTypes typeMap p (PrimBindIO _ iox f) =
+  let iox' = prettyExprWithTypes typeMap AtomPrec iox
+      f' = prettyExprWithTypes typeMap AtomPrec f
+   in parensIf (p > AppPrec) (text "#bindIO" <+> iox' <+> f')
 
 prettyBlockWithTypes :: (Show (BTVar b), Show b, Eq b) => [(b, Type (BTVar b))] -> Block b -> Doc
 prettyBlockWithTypes typeMap (Block stmts expr) =

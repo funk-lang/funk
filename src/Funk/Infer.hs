@@ -7,6 +7,7 @@ import Control.Monad.IO.Class
 import Funk.Fresh
 import Funk.STerm
 import Funk.Term
+import qualified Text.Parsec.Pos as Pos
 
 data Constraint
   = CEq SType SType
@@ -154,6 +155,40 @@ constraintsExpr = \case
     -- #print expr has type #IO #Unit
     csExpr <- constraintsExpr expr
     return $ [ CEq (TVar ty) (TIO TUnit) ] ++ csExpr
+  PrimFmapIO ty f io -> do
+    -- #fmapIO f io has type #IO b where f: a -> b and io: #IO a
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    csF <- constraintsExpr f
+    csIO <- constraintsExpr io
+    return $ [ CEq (TVar ty) (TIO (TVar bType)),
+               CEq (TVar (typeOf f)) (TArrow (TVar aType) (TVar bType)),
+               CEq (TVar (typeOf io)) (TIO (TVar aType))
+             ] ++ csF ++ csIO
+  PrimPureIO ty expr -> do
+    -- #pureIO expr has type #IO a where expr has type a
+    csExpr <- constraintsExpr expr
+    return $ [CEq (TVar ty) (TIO (TVar (typeOf expr)))] ++ csExpr
+  PrimApplyIO ty iof iox -> do
+    -- #applyIO iof iox has type #IO b where iof: #IO (a -> b) and iox: #IO a
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    csIOF <- constraintsExpr iof
+    csIOX <- constraintsExpr iox
+    return $ [ CEq (TVar ty) (TIO (TVar bType)),
+               CEq (TVar (typeOf iof)) (TIO (TArrow (TVar aType) (TVar bType))),
+               CEq (TVar (typeOf iox)) (TIO (TVar aType))
+             ] ++ csIOF ++ csIOX
+  PrimBindIO ty iox f -> do
+    -- #bindIO iox f has type #IO b where iox: #IO a and f: a -> #IO b
+    aType <- freshUnboundTy (Pos.newPos "" 1 1)
+    bType <- freshUnboundTy (Pos.newPos "" 1 1)
+    csIOX <- constraintsExpr iox
+    csF <- constraintsExpr f
+    return $ [ CEq (TVar ty) (TIO (TVar bType)),
+               CEq (TVar (typeOf iox)) (TIO (TVar aType)),
+               CEq (TVar (typeOf f)) (TArrow (TVar aType) (TIO (TVar bType)))
+             ] ++ csIOX ++ csF
 
 constraintsStmt :: SStmt -> Fresh [Constraint]
 constraintsStmt (Let ty _ mty body) = do

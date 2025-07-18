@@ -199,6 +199,25 @@ substExpr pexpr = case pexpr of
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     expr' <- substExpr expr
     return $ PrimPrint iTy expr'
+  PrimFmapIO _ f io -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    f' <- substExpr f
+    io' <- substExpr io
+    return $ PrimFmapIO iTy f' io'
+  PrimPureIO _ expr -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    expr' <- substExpr expr
+    return $ PrimPureIO iTy expr'
+  PrimApplyIO _ iof iox -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    iof' <- substExpr iof
+    iox' <- substExpr iox
+    return $ PrimApplyIO iTy iof' iox'
+  PrimBindIO _ iox f -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    iox' <- substExpr iox
+    f' <- substExpr f
+    return $ PrimBindIO iTy iox' f'
   where
     getTVarName (TVar ident) = unLocated ident
     getTVarName _ = Ident "other"

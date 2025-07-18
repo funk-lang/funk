@@ -171,6 +171,47 @@ eval = \case
     return $ VIO $ do
       putStrLn $ prettyValue val
       return VUnit
+  CoreFmapIO f io -> do
+    fVal <- eval f
+    ioVal <- eval io
+    case (fVal, ioVal) of
+      (VLam var _ty (body, closure), VIO ioAction) -> do
+        return $ VIO $ do
+          result <- ioAction
+          case runInterpreterWithEnv (Map.insert var result closure) Map.empty body of
+            Left err -> error $ "fmapIO error: " ++ err
+            Right val -> return val
+      _ -> throwError "Type error: fmapIO expects function and IO action"
+  CorePureIO expr -> do
+    val <- eval expr
+    return $ VIO (return val)
+  CoreApplyIO iof iox -> do
+    iofVal <- eval iof
+    ioxVal <- eval iox
+    case (iofVal, ioxVal) of
+      (VIO fAction, VIO xAction) -> do
+        return $ VIO $ do
+          f <- fAction
+          x <- xAction
+          case f of
+            VLam var _ty (body, closure) -> do
+              case runInterpreterWithEnv (Map.insert var x closure) Map.empty body of
+                Left err -> error $ "applyIO error: " ++ err
+                Right val -> return val
+            _ -> error "Type error: applyIO expects function in IO"
+      _ -> throwError "Type error: applyIO expects two IO actions"
+  CoreBindIO iox f -> do
+    ioxVal <- eval iox
+    fVal <- eval f
+    case (ioxVal, fVal) of
+      (VIO xAction, VLam var _ty (body, closure)) -> do
+        return $ VIO $ do
+          x <- xAction
+          case runInterpreterWithEnv (Map.insert var x closure) Map.empty body of
+            Left err -> error $ "bindIO error: " ++ err
+            Right (VIO nextAction) -> nextAction
+            Right val -> return val
+      _ -> throwError "Type error: bindIO expects IO action and function"
 
 applyFunction :: Value -> Value -> Interp Value
 applyFunction funcVal argVal = case funcVal of
@@ -212,7 +253,14 @@ evalProgram :: CoreProgram -> Either String Value
 evalProgram (CoreProgram _dataTypes main) = runInterpreter main
 
 evalProgramIO :: CoreProgram -> IO (Either String Value)
-evalProgramIO (CoreProgram _dataTypes main) = runInterpreterIO main
+evalProgramIO (CoreProgram _dataTypes main) = do
+  result <- runInterpreterIO main
+  case result of
+    Right (VCon "Record1" [VIO ioAction]) -> do
+      -- This is our IO wrapper - execute the IO action and return VUnit
+      _ <- ioAction
+      return $ Right VUnit
+    _ -> return result
 
 getBuiltInMethod :: String -> CoreType -> String -> Interp (Maybe Value)
 getBuiltInMethod traitName targetType methodName = case (traitName, methodName, targetType) of

@@ -166,6 +166,32 @@ primPrintExpr = do
   tok TokPrint
   PrimPrint () <$> atomicExpr
 
+primFmapIOExpr :: Parser PExpr
+primFmapIOExpr = do
+  tok TokFmapIO
+  f <- atomicExpr
+  io <- atomicExpr
+  return $ PrimFmapIO () f io
+
+primPureIOExpr :: Parser PExpr
+primPureIOExpr = do
+  tok TokPureIO
+  PrimPureIO () <$> atomicExpr
+
+primApplyIOExpr :: Parser PExpr
+primApplyIOExpr = do
+  tok TokApplyIO
+  iof <- atomicExpr
+  iox <- atomicExpr
+  return $ PrimApplyIO () iof iox
+
+primBindIOExpr :: Parser PExpr
+primBindIOExpr = do
+  tok TokBindIO
+  iox <- atomicExpr
+  f <- atomicExpr
+  return $ PrimBindIO () iox f
+
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
 
@@ -225,6 +251,10 @@ atomicExpr =
       primNilExpr,
       primConsExpr,
       primPrintExpr,
+      primFmapIOExpr,
+      primPureIOExpr,
+      primApplyIOExpr,
+      primBindIOExpr,
       varExpr,
       parensExpr,
       try blockExpr

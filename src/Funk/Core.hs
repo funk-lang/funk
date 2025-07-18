@@ -47,6 +47,10 @@ data CoreExpr
   | CoreReturn CoreExpr                  -- IO return (pure value wrapped in IO)
   | CoreBind CoreExpr CoreExpr           -- IO bind (monadic sequencing)
   | CorePrint CoreExpr                   -- Primitive print function
+  | CoreFmapIO CoreExpr CoreExpr         -- Primitive fmap for IO
+  | CorePureIO CoreExpr                  -- Primitive pure for IO
+  | CoreApplyIO CoreExpr CoreExpr        -- Primitive apply for IO
+  | CoreBindIO CoreExpr CoreExpr         -- Primitive bind for IO
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -161,6 +165,21 @@ prettyCoreExpr p (CoreBind expr1 expr2) =
 prettyCoreExpr p (CorePrint expr) =
   let expr' = prettyCoreExpr (p+1) expr
   in parensIf (p > 0) (text "print" <+> expr')
+prettyCoreExpr p (CoreFmapIO f io) =
+  let f' = prettyCoreExpr (p+1) f
+      io' = prettyCoreExpr (p+1) io
+  in parensIf (p > 0) (text "fmapIO" <+> f' <+> io')
+prettyCoreExpr p (CorePureIO expr) =
+  let expr' = prettyCoreExpr (p+1) expr
+  in parensIf (p > 0) (text "pureIO" <+> expr')
+prettyCoreExpr p (CoreApplyIO iof iox) =
+  let iof' = prettyCoreExpr (p+1) iof
+      iox' = prettyCoreExpr (p+1) iox
+  in parensIf (p > 0) (text "applyIO" <+> iof' <+> iox')
+prettyCoreExpr p (CoreBindIO iox f) =
+  let iox' = prettyCoreExpr (p+1) iox
+      f' = prettyCoreExpr (p+1) f
+  in parensIf (p > 0) (text "bindIO" <+> iox' <+> f')
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =

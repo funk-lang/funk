@@ -182,6 +182,25 @@ compileResolvedExpr = \case
   Term.PrimPrint _ expr -> do
     coreExpr <- compileResolvedExpr expr
     return $ CorePrint coreExpr
+  
+  Term.PrimFmapIO _ f io -> do
+    coreF <- compileResolvedExpr f
+    coreIO <- compileResolvedExpr io
+    return $ CoreFmapIO coreF coreIO
+  
+  Term.PrimPureIO _ expr -> do
+    coreExpr <- compileResolvedExpr expr
+    return $ CorePureIO coreExpr
+  
+  Term.PrimApplyIO _ iof iox -> do
+    coreIOF <- compileResolvedExpr iof
+    coreIOX <- compileResolvedExpr iox
+    return $ CoreApplyIO coreIOF coreIOX
+  
+  Term.PrimBindIO _ iox f -> do
+    coreIOX <- compileResolvedExpr iox
+    coreF <- compileResolvedExpr f
+    return $ CoreBindIO coreIOX coreF
 
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr

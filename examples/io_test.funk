@@ -1,0 +1,40 @@
+data IO a = {
+  unIO: a
+}
+
+trait Functor (f :: * -> *) {
+  fmap: forall a b . (a -> b) -> f a -> f b
+}
+
+trait Applicative (f :: * -> *) {
+  apply: forall a b . f (a -> b) -> f a -> f b
+}
+
+trait Monad (m :: * -> *) {
+  return: forall a . a -> m a,
+  bind: forall a b . m a -> (a -> m b) -> m b
+}
+
+instance Functor forall a . IO = {
+  fmap = \f ioVal -> ioVal
+}
+
+instance Applicative forall a . IO = {
+  apply = \ioF ioX -> ioX
+}
+
+instance Monad forall a . IO = {
+  return = \x -> IO { unIO = x },
+  bind = \ioX f -> ioX
+}
+
+let wrapIO = \x -> IO { unIO = x };
+let print = \x -> IO { unIO = #print x };
+let testIO = IO { unIO = "Hello from IO!" };
+let identity = \x -> x;
+let mappedIO = fmap identity testIO;
+let bindIO = bind testIO identity;
+let printTest = print "Hello from IO print wrapper!";
+let printTest2 = print "Testing multiple IO actions!";
+let mappedPrint = fmap (\s -> s) (print "Mapped IO action!");
+let main = mappedPrint;
