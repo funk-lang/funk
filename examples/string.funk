@@ -1,0 +1,2 @@
+let message: #String = "Welcome to the Funk programming language!";
+let main = #print message;

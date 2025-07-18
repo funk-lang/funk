@@ -53,6 +53,7 @@ typePos (TApp t1 _) = typePos t1
 typePos (TList t) = typePos t
 typePos (TIO t) = typePos t
 typePos TUnit = return (Pos.newPos "" 1 1)
+typePos TString = return (Pos.newPos "" 1 1)
 
 
 data Var = VBound SExpr | VUnbound (Located Ident)
@@ -320,6 +321,7 @@ typeOf = \case
   RecordCreation ty _ _ -> ty
   TraitMethod ty _ _ _ _ -> ty
   PrimUnit ty -> ty
+  PrimString ty _s -> ty
   PrimNil ty _ -> ty
   PrimCons ty _ _ _ -> ty
   PrimPrint ty _ -> ty
@@ -372,6 +374,7 @@ sExprToDisplayWithTypes sexpr = case sexpr of
     targetType' <- smartTraitMethodTargetResolve targetType
     return $ TraitMethod () traitName' typeArgs' targetType' methodName
   PrimUnit _ -> return $ PrimUnit ()
+  PrimString _ s -> return $ PrimString () s
   PrimNil _ ty -> do
     ty' <- sTypeToDisplay ty
     return $ PrimNil () ty'
@@ -435,6 +438,7 @@ sTypeToDisplay = sTypeToDisplayHelper []
         t' <- sTypeToDisplayHelper visited t
         return $ TIO t'
       TUnit -> return TUnit
+      TString -> return TString
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case

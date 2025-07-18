@@ -22,6 +22,7 @@ data CoreType
   | TyForall TyVar CoreType              -- Universal quantification
   | TyApp CoreType CoreType              -- Type application
   | TyUnit                               -- Unit type
+  | TyString                             -- String type
   | TyList CoreType                      -- List type
   | TyIO CoreType                        -- IO type
   | TyCon String                         -- Type constructors (State, etc.)
@@ -38,6 +39,7 @@ data CoreExpr
   | CoreCase CoreExpr [(CorePat, CoreExpr)] -- Case expressions
   | CoreCon String [CoreExpr]            -- Constructor applications
   | CoreUnit                             -- Unit value
+  | CoreString String                    -- String literal
   | CoreNil CoreType                     -- Empty list
   | CoreCons CoreType CoreExpr CoreExpr  -- List constructor
   | CoreDict String CoreType [CoreExpr]  -- Dictionary construction
@@ -86,6 +88,7 @@ prettyCoreType p (TyApp t1 t2) =
       s2 = prettyCoreType (p+1) t2
   in parensIf (p > 0) (s1 <+> s2)
 prettyCoreType _ TyUnit = text "Unit"
+prettyCoreType _ TyString = text "String"
 prettyCoreType p (TyList t) =
   let t' = prettyCoreType (p+1) t
   in parensIf (p > 0) (text "List" <+> t')
@@ -130,6 +133,7 @@ prettyCoreExpr p (CoreCon name args) =
   let args' = map (prettyCoreExpr (p+1)) args
   in parensIf (p > 0 && not (null args)) (text name <+> hsep args')
 prettyCoreExpr _ CoreUnit = text "()"
+prettyCoreExpr _ (CoreString s) = doubleQuotes (text s)
 prettyCoreExpr p (CoreNil ty) =
   let ty' = prettyCoreType 0 ty
   in parensIf (p > 0) ((text "[]" <> text "@") <> ty')

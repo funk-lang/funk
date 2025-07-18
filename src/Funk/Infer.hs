@@ -135,6 +135,9 @@ constraintsExpr = \case
   PrimUnit ty -> do
     -- #unit has type #Unit
     return [CEq (TVar ty) TUnit]
+  PrimString ty _s -> do
+    -- string literals have type #String
+    return [CEq (TVar ty) TString]
   PrimNil ty elemTy -> do
     -- #nil[T] has type #List T
     return [CEq (TVar ty) (TList elemTy)]

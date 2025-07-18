@@ -11,6 +11,7 @@ import Funk.Core
 
 data Value
   = VUnit
+  | VString String
   | VLam Var CoreType (CoreExpr, Env)
   | VTyLam TyVar (CoreExpr, Env)
   | VCon String [Value]
@@ -20,6 +21,7 @@ data Value
 
 instance Show Value where
   show VUnit = "()"
+  show (VString s) = show s
   show (VLam var ty _) = "λ" ++ show var ++ ":" ++ show ty ++ ". <closure>"
   show (VTyLam tyvar _) = "Λ" ++ show tyvar ++ ". <closure>"
   show (VCon name []) = name
@@ -31,6 +33,7 @@ instance Show Value where
 
 instance Eq Value where
   VUnit == VUnit = True
+  (VString s1) == (VString s2) = s1 == s2
   (VLam var1 ty1 _) == (VLam var2 ty2 _) = var1 == var2 && ty1 == ty2
   (VTyLam tyvar1 _) == (VTyLam tyvar2 _) = tyvar1 == tyvar2
   (VCon name1 args1) == (VCon name2 args2) = name1 == name2 && args1 == args2
@@ -94,6 +97,7 @@ substType tyvar replacement ty = case ty of
   TyForall tv t -> if tv == tyvar then ty else TyForall tv (substType tyvar replacement t)
   TyApp t1 t2 -> TyApp (substType tyvar replacement t1) (substType tyvar replacement t2)
   TyUnit -> TyUnit
+  TyString -> TyString
   TyList t -> TyList (substType tyvar replacement t)
   TyIO t -> TyIO (substType tyvar replacement t)
   TyCon name -> TyCon name
@@ -124,6 +128,7 @@ eval = \case
     argVals <- mapM eval args
     return $ VCon name argVals
   CoreUnit -> return VUnit
+  CoreString s -> return $ VString s
   CoreNil _ty -> return $ VList []
   CoreCons _ty headExpr tailExpr -> do
     headVal <- eval headExpr
@@ -238,6 +243,7 @@ getBuiltInMethod traitName targetType methodName = case (traitName, methodName, 
 prettyValue :: Value -> String
 prettyValue = \case
   VUnit -> "()"
+  VString s -> s
   VLam var ty _ -> "λ" ++ show var ++ ":" ++ show ty ++ ". <closure>"
   VTyLam tyvar _ -> "Λ" ++ show tyvar ++ ". <closure>"
   VCon name [] -> name

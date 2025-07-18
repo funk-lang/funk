@@ -76,6 +76,7 @@ compileType = \case
     return $ TyForall tyvar coreType
   Term.TApp t1 t2 -> TyApp <$> compileType t1 <*> compileType t2
   Term.TUnit -> return TyUnit
+  Term.TString -> return TyString
   Term.TList t -> TyList <$> compileType t
   Term.TIO t -> TyIO <$> compileType t
   Term.TConstraint _traitName _typeVars targetType _bodyType -> do
@@ -153,6 +154,8 @@ compileResolvedExpr = \case
     return $ CoreDictAccess dictExpr methodNameStr
   
   Term.PrimUnit _ -> return CoreUnit
+  
+  Term.PrimString _ s -> return $ CoreString s
   
   Term.PrimNil _ ty -> do
     coreType <- compileType ty

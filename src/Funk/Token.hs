@@ -18,6 +18,7 @@ instance (Show a) => Show (Located a) where
 
 data Token
   = TokIdent String
+  | TokString String
   | TokLambda
   | TokForall
   | TokArrow
@@ -45,6 +46,7 @@ data Token
   | TokLet
   | TokList
   | TokUnit
+  | TokStringType
   | TokNil
   | TokCons
   | TokPrint
@@ -53,6 +55,7 @@ data Token
 instance Show Token where
   show = \case
     TokIdent _ -> "identifier"
+    TokString _ -> "string literal"
     TokLambda -> "'\\'"
     TokForall -> "'forall'"
     TokArrow -> "'->'"
@@ -80,6 +83,7 @@ instance Show Token where
     TokLet -> "'let'"
     TokList -> "'#List'"
     TokUnit -> "'#Unit'"
+    TokStringType -> "'#String'"
     TokNil -> "'#nil'"
     TokCons -> "'#cons'"
     TokPrint -> "'#print'"
@@ -106,10 +110,25 @@ token = do
         TokSemicolon <$ char ';',
         TokComma <$ char ',',
         TokAt <$ char '@',
+        stringToken,
         identToken
       ]
   return $ Located pos t
   where
+    stringToken = do
+      char '"'
+      chars <- many stringChar
+      char '"'
+      return $ TokString chars
+    stringChar = 
+      (char '\\' >> escapeChar) <|> noneOf "\""
+    escapeChar = choice
+      [ char 'n' >> return '\n'
+      , char 't' >> return '\t'
+      , char 'r' >> return '\r'
+      , char '\\' >> return '\\'
+      , char '"' >> return '"'
+      ]
     identToken = do
       c <- letter <|> char '_' <|> char '#'
       cs <- many (alphaNum <|> char '_')
@@ -124,6 +143,7 @@ token = do
         "let" -> TokLet
         "#List" -> TokList
         "#Unit" -> TokUnit
+        "#String" -> TokStringType
         "#nil" -> TokNil
         "#cons" -> TokCons
         "#print" -> TokPrint

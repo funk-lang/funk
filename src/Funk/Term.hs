@@ -24,6 +24,7 @@ data Type b
   | TList (Type b)
   | TIO (Type b)
   | TUnit
+  | TString
   deriving (Show, Eq)
 
 data Kind b
@@ -68,6 +69,7 @@ prettyType p (TIO t) =
   let s = prettyType AtomPrec t
    in parensIf (p > AtomPrec) (text "#IO" <+> s)
 prettyType _ TUnit = text "#Unit"
+prettyType _ TString = text "#String"
 
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
@@ -120,6 +122,7 @@ data Expr b
   | RecordCreation (BRecordCreation b) (Expr b) [(Ident, Expr b)]
   | TraitMethod (BApp b) (BTVar b) [Type (BTVar b)] (Type (BTVar b)) Ident
   | PrimUnit (BVar b)
+  | PrimString (BVar b) String
   | PrimNil (BVar b) (Type (BTVar b))
   | PrimCons (BVar b) (Type (BTVar b)) (Expr b) (Expr b)
   | PrimPrint (BVar b) (Expr b)
@@ -256,6 +259,7 @@ prettyExpr p (TraitMethod _ traitName _ targetType methodName) =
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExpr _ (PrimUnit _) = text "#Unit"
+prettyExpr _ (PrimString _ s) = doubleQuotes (text s)
 prettyExpr _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
 prettyExpr p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExpr AtomPrec headExpr
@@ -331,6 +335,7 @@ prettyExprWithTypes _ p (TraitMethod _ traitName _ targetType methodName) =
       targetDoc = prettyType AtomPrec targetType
    in parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
 prettyExprWithTypes _ _ (PrimUnit _) = text "#Unit"
+prettyExprWithTypes _ _ (PrimString _ s) = doubleQuotes (text s)
 prettyExprWithTypes _ _ (PrimNil _ ty) = text "#nil" <> brackets (prettyType AtomPrec ty)
 prettyExprWithTypes typeMap p (PrimCons _ ty headExpr tailExpr) =
   let headDoc = prettyExprWithTypes typeMap AtomPrec headExpr

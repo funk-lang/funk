@@ -60,6 +60,9 @@ listType = tok TokList *> (TList <$> atomicType)
 unitType :: Parser PType
 unitType = tok TokUnit $> TUnit
 
+stringType :: Parser PType
+stringType = tok TokStringType $> TString
+
 parensType :: Parser PType
 parensType = tok TokLParen *> typeExpr <* tok TokRParen
 
@@ -77,6 +80,7 @@ atomicType =
     [ try forallType,
       listType,
       unitType,
+      stringType,
       typeVar,
       parensType
     ]
@@ -130,6 +134,15 @@ varExpr = Var () . PBinding . fmap Ident <$> identTok
 
 primUnitExpr :: Parser PExpr
 primUnitExpr = tok TokUnit $> PrimUnit ()
+
+primStringExpr :: Parser PExpr
+primStringExpr = do
+  Located _ (TokString s) <- tokenPrim show updatePos testTok <?> "string literal"
+  return $ PrimString () s
+  where
+    testTok (Located _ (TokString s)) = Just (Located undefined (TokString s))
+    testTok _ = Nothing
+    updatePos _ (Located pos _) _ = pos
 
 primNilExpr :: Parser PExpr
 primNilExpr = do
@@ -208,6 +221,7 @@ atomicExpr =
   choice
     [ try recordCreationExpr,
       primUnitExpr,
+      primStringExpr,
       primNilExpr,
       primConsExpr,
       primPrintExpr,

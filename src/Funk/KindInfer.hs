@@ -58,6 +58,9 @@ kindInferType = \case
   TUnit -> do
     -- Unit type has kind *
     return []
+  TString -> do
+    -- String type has kind *
+    return []
 
 freshStarKind :: SourcePos -> Fresh SKind
 freshStarKind _ = return KStar

@@ -94,7 +94,9 @@ substTy pty = case pty of
     return $ TConstraint traitName' typeVars' targetType' bodyType'
   TApp t1 t2 -> TApp <$> substTy t1 <*> substTy t2
   TList t -> TList <$> substTy t
+  TIO t -> TIO <$> substTy t
   TUnit -> return TUnit
+  TString -> return TString
 
 extractPBinding :: PExpr -> PBinding
 extractPBinding (Var _ pbinding) = pbinding
@@ -180,6 +182,9 @@ substExpr pexpr = case pexpr of
   PrimUnit _ -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     return $ PrimUnit iTy
+  PrimString _ s -> do
+    iTy <- freshUnboundTy (Pos.newPos "" 1 1)
+    return $ PrimString iTy s
   PrimNil _ ty -> do
     iTy <- freshUnboundTy (Pos.newPos "" 1 1)
     ty' <- substTy ty

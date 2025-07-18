@@ -41,6 +41,7 @@ prune (TApp t1 t2) = TApp <$> prune t1 <*> prune t2
 prune (TList t) = TList <$> prune t
 prune (TIO t) = TIO <$> prune t
 prune TUnit = return TUnit
+prune TString = return TString
 prune (TConstraint traitName typeVars targetType bodyType) = do
   targetType' <- prune targetType
   bodyType' <- prune bodyType
@@ -90,6 +91,7 @@ unify t1 t2 = do
     (TList a, TList b) -> unify a b
     (TIO a, TIO b) -> unify a b
     (TUnit, TUnit) -> return ()
+    (TString, TString) -> return ()
     (TForall v1 t1', TForall v2 t2') -> do
       fresh <- freshUnboundTyS pos
       let t1Subst = substituteTypeVar v1 (TVar fresh) t1'
@@ -151,6 +153,7 @@ substituteTypeVar old new ty = case ty of
   TList t -> TList (substituteTypeVar old new t)
   TIO t -> TIO (substituteTypeVar old new t)
   TUnit -> TUnit
+  TString -> TString
 
 bindVar :: STBinding -> SType -> Solver ()
 bindVar v ty = do
@@ -175,6 +178,7 @@ occursCheck v t = do
     TList t1 -> occursCheck v t1
     TIO t1 -> occursCheck v t1
     TUnit -> return False
+    TString -> return False
 
 solveTrait :: STBinding -> [STBinding] -> SType -> Solver ()
 solveTrait traitName typeArgs targetType = do
@@ -275,6 +279,7 @@ tryUnify envRef t1 t2 = do
     (TList t1a, TList t2a) -> tryUnify envRef t1a t2a
     (TIO t1a, TIO t2a) -> tryUnify envRef t1a t2a
     (TUnit, TUnit) -> return $ Right ()
+    (TString, TString) -> return $ Right ()
     _ -> return $ Left "type mismatch"
 
 substAndPrune :: IORef UnificationEnv -> SType -> IO SType
@@ -299,6 +304,7 @@ substAndPrune envRef ty = do
     TList t -> TList <$> substAndPrune envRef t
     TIO t -> TIO <$> substAndPrune envRef t
     TUnit -> return TUnit
+    TString -> return TString
 
 occursCheckIO :: STBinding -> SType -> IO Bool
 occursCheckIO var ty = case ty of
@@ -321,6 +327,7 @@ occursCheckIO var ty = case ty of
   TList t -> occursCheckIO var t
   TIO t -> occursCheckIO var t
   TUnit -> return False
+  TString -> return False
 
 solveConstraints :: [Constraint] -> S.Env -> IO (Either [SError] ())
 solveConstraints cs env = do
