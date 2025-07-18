@@ -258,13 +258,34 @@ extractDataTypes stmts = do
       
       _ -> return []
 
+-- | Find the main binding in the statements and compile it with proper context
+findMainBinding :: [Term.Stmt Ident] -> CompileM CoreExpr
+findMainBinding stmts = do
+  case findMainStmt stmts of
+    Just (mainBody, otherStmts) -> do
+      -- Compile all the other statements first to build context
+      mainExpr <- compileResolvedExpr mainBody
+      foldrM compileResolvedStmt mainExpr otherStmts
+    Nothing -> error "No main binding found in program"
+  where
+    findMainStmt :: [Term.Stmt Ident] -> Maybe (Term.Expr Ident, [Term.Stmt Ident])
+    findMainStmt allStmts = go allStmts []
+      where
+        go [] _ = Nothing
+        go (Term.Let _ (Ident "main") _ body : rest) acc = 
+          Just (body, acc ++ rest)
+        go (stmt : rest) acc = go rest (acc ++ [stmt])
+
 -- | Compile a complete STerm block to a Core program
 compileProgram :: SBlock -> CompileM CoreProgram
 compileProgram (Term.Block stmts expr) = do
-  -- First resolve the block to get Term.Stmt Ident
+  -- First resolve the block to get Term.Stmt Ident for checking
   resolvedBlock <- liftIO $ sBlockToDisplayWithTypes (Term.Block stmts expr)
   case resolvedBlock of
     Term.Block resolvedStmts _resolvedExpr -> do
+      -- The parser ensures top-level programs only contain statements with a unit placeholder
+      -- No need to check the final expression since it's always unit from the parser
+      
       -- Extract trait and instance information
       env <- get
       let dictState = compileDictState env
@@ -273,17 +294,13 @@ compileProgram (Term.Block stmts expr) = do
         extractInstanceInfo resolvedStmts) dictState
       put env { compileDictState = newDictState }
       
-      -- Compile data types and main expression
+      -- Compile data types
       dataTypes <- extractDataTypes stmts
-      mainExpr <- compileResolvedBlock resolvedBlock
       
-      -- Wrap the main expression in IO if it's not already an IO action
-      -- For now, we'll wrap it in a print statement to make it an IO action
-      main <- case mainExpr of
-        CorePrint _ -> return mainExpr  -- Already an IO action
-        _ -> return $ CorePrint mainExpr  -- Wrap in print to make it IO
+      -- Look for main binding in the statements
+      mainExpr <- findMainBinding resolvedStmts
       
-      return $ CoreProgram dataTypes main
+      return $ CoreProgram dataTypes mainExpr
 
 -- | Main compilation function
 compile :: SBlock -> IO CoreProgram

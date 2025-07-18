@@ -1,2 +1,1 @@
 let main = #print #Unit;
-main

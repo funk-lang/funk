@@ -400,6 +400,10 @@ expr =
     ]
 
 parseTopLevel :: [Located Token] -> Either ParseError PBlock
-parseTopLevel = parse (block <* eof) "<input>"
+parseTopLevel = parse (topLevelBlock <* eof) "<input>"
   where
-    block = Block <$> many (try stmt) <*> expr
+    topLevelBlock = do
+      stmts <- many (try stmt)
+      -- Top level programs contain only statements, no final expression
+      -- We add a unit expression as a placeholder to satisfy the Block type
+      return $ Block stmts (PrimUnit ())

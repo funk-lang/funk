@@ -12,7 +12,7 @@ import Funk.Subst hiding (Env)
 import Funk.Term
 import Funk.Token
 import Funk.Compiler (compile)
-import Funk.Interpreter (evalProgramIO, prettyValue)
+import Funk.Interpreter (evalProgramIO, prettyValue, Value(..))
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
 import Text.Parsec
@@ -45,6 +45,7 @@ run = do
           result <- evalProgramIO coreProgram
           case result of
             Left interpErr -> putStrLn $ "Interpreter error: " ++ interpErr
+            Right VUnit -> return () -- Don't print unit results from IO actions
             Right result -> putStrLn $ prettyValue result
         else do
           -- Output the pretty-printed resolved AST with proper type resolution
