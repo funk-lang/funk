@@ -1,0 +1,12 @@
+trait Monad (m :: * -> *) {
+  return: forall a . (a -> m a),
+  bind: forall a b . (m a -> ((a -> m b) -> m b))
+}
+
+let bindInfix = \ma f -> bind ma f;
+let bindFlipped = \f ma -> bind ma f;
+let sequence = \ma mb -> bind ma (\_ -> mb);
+let join = \mma -> bind mma (\ma -> ma);
+let whenM = \p action -> #ifThenElse p
+  action
+  (return #Unit);

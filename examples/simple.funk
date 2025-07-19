@@ -1,3 +1,0 @@
-let greeting = "Hello from Funk!";
-let number = 42;
-let main = #print greeting;

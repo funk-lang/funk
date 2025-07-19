@@ -2,15 +2,15 @@
 
 module Funk where
 
-import Data.List
+import Data.List (intercalate, isPrefixOf)
 import Funk.Fresh (Env (Env), runFresh)
 import Funk.Infer (constraintsBlock)
-import Funk.Parser (parseTopLevel)
+import Funk.Parser (parseTopLevel, PBlock, PStmt)
 import Funk.STerm
 import Funk.Solver
 import Funk.Subst hiding (Env)
-import Funk.Term
-import Funk.Token
+import Funk.Term (Block(..), Stmt(..), Ident(..), ModulePath(..), showFileWithTypes, prettyType, Precedence(..))
+import Funk.Token (tokenize, Located, locatedPos, unLocated)
 import Funk.Compiler (compile)
 import Funk.Interpreter (evalProgramIO, prettyValue, Value(..))
 import Funk.Fmt (formatFile, FmtOptions(..))
@@ -21,7 +21,8 @@ import System.FilePath ((</>), takeExtension, takeFileName, dropExtension)
 import Control.Monad (forM)
 import qualified Data.Map as Map
 import Text.Parsec
-import Text.Parsec.Error
+import Text.Parsec.Error (newErrorMessage, Message(..), errorMessages)
+import Text.Parsec.Pos (initialPos)
 import qualified Text.PrettyPrint as Pretty
 
 data Command
@@ -89,13 +90,10 @@ runProgram opts = do
             Right moduleMap -> do
               mainInput <- readFile (runMainFile opts)
               
-              -- Combine library files with main file
-              let libInputs = Map.elems moduleMap
-              let combinedInput = unlines (libInputs ++ [mainInput])
-              
-              res <- tryRun combinedInput
+              -- Parse and resolve modules with proper use statement handling
+              res <- tryRunWithModules mainInput moduleMap
               case res of
-                Left err -> showErrorPretty err combinedInput >>= putStrLn  
+                Left err -> showErrorPretty err mainInput >>= putStrLn  
                 Right block -> do
                   if runInterpret opts
                     then do
@@ -107,7 +105,7 @@ runProgram opts = do
                         Right VUnit -> return () -- Don't print unit results from IO actions
                         Right resultVal -> putStrLn $ prettyValue resultVal
                     else do
-                      -- Output the pretty-printed resolved AST with proper type resolution
+                                            -- Output the pretty-printed resolved AST with proper type resolution
                       resolvedBlock <- sBlockToDisplayWithTypes block
                       putStrLn $ showFileWithTypes [] resolvedBlock
 
@@ -196,14 +194,20 @@ loadModules filePaths = do
             return ("", "")
       return $ Right $ Map.fromList $ filter ((/= "") . fst) modules
 
--- Convert file path to module name (e.g., "Math.funk" -> "Math", "nested/Advanced.funk" -> "Nested.Advanced")  
+-- Convert file path to module name, handling library directory structure
 filePathToModuleName :: FilePath -> String
 filePathToModuleName filePath = 
-  let baseName = takeFileName filePath
-      nameWithoutExt = dropExtension baseName
-  in if nameWithoutExt == ""
+  let -- Remove common library directory prefixes and the .funk extension
+      cleanPath = dropExtension filePath
+      -- Remove examples/lib/ prefix if present
+      relativePath = if "examples/lib/" `isPrefixOf` cleanPath
+                     then drop (length "examples/lib/") cleanPath
+                     else takeFileName cleanPath
+      -- Convert path separators to dots for hierarchical module names
+      normalizedPath = map (\c -> if c == '/' || c == '\\' then '.' else c) relativePath
+  in if normalizedPath == ""
      then ""
-     else nameWithoutExt
+     else normalizedPath
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
@@ -323,3 +327,48 @@ showErrorLine pos input msg =
             ++ msg
             ++ setSGRCode [Reset]
         ]
+
+tryRunWithModules :: String -> Map.Map String String -> IO (Either Error SBlock)
+tryRunWithModules mainInput moduleMap = do
+  let result = tokenize mainInput >>= parseTopLevel
+  case result of
+    Left err -> return $ Left (ParserError err)
+    Right topLevel -> do
+      -- For now, just pass through without expanding use statements
+      expandedTopLevel <- resolveUseStatements topLevel moduleMap
+      case expandedTopLevel of
+        Left err -> return $ Left err
+        Right expanded -> do
+          (res, env) <- runSubst (substBlock expanded)
+          case res of
+            Left errs -> return $ Left (SubstError errs)
+            Right block -> do
+              cs <- fst <$> runFresh (constraintsBlock block) (Env $ envNextIdx env)
+              solveConstraints cs env >>= \case
+                Left errs -> return $ Left (SolverError errs)
+                Right () -> return $ Right block
+
+-- Simple module expansion for now
+resolveUseStatements :: PBlock -> Map.Map String String -> IO (Either Error PBlock)
+resolveUseStatements (Block stmts finalExpr) moduleMap = do
+  expandedStmts <- expandAllStatements [] stmts
+  case expandedStmts of
+    Left err -> return $ Left err
+    Right expanded -> return $ Right $ Block expanded finalExpr
+  where
+    expandAllStatements :: [PStmt] -> [PStmt] -> IO (Either Error [PStmt])
+    expandAllStatements acc [] = return $ Right acc
+    expandAllStatements acc (stmt:rest) = do
+      case stmt of
+        UseAll modPath -> do
+          let modName = modulePathToString modPath
+          case Map.lookup modName moduleMap of
+            Nothing -> return $ Left $ ParserError $ newErrorMessage (Message $ "Module not found: " ++ modName) (initialPos "")
+            Just content -> do
+              case tokenize content >>= parseTopLevel of
+                Left err -> return $ Left $ ParserError err
+                Right (Block moduleStmts _) -> expandAllStatements (acc ++ moduleStmts) rest
+        _ -> expandAllStatements (acc ++ [stmt]) rest
+
+modulePathToString :: ModulePath -> String
+modulePathToString (ModulePath idents) = intercalate "." (map unIdent idents)

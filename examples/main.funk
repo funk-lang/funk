@@ -1,2 +1,6 @@
-use IO.*;
-let main = replicateM_ 3 (print "Hello from replicateM_!");
+use Control.Monad.*;
+use Data.IO.*;
+
+let demo = putStrLn "Hello from the Funk programming language!";
+
+let main = demo;

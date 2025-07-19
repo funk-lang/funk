@@ -1,0 +1,9 @@
+trait Functor (f :: * -> *) {
+  fmap: forall a b . ((a -> b) -> (f a -> f b))
+}
+
+let fmapInfix = \f fa -> fmap f fa;
+let fmapFlipped = \fa f -> fmap f fa;
+let replaceWith = \a fb -> fmap (\_ -> a) fb;
+let replaceWithFlipped = \fa b -> fmap (\_ -> b) fa;
+let voidFunctor = \fa -> fmap (\_ -> #Unit) fa;

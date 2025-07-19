@@ -1,7 +1,0 @@
-use SimpleTest.*;
-use IO.*;
-let main = #bindIO print "Running basic tests..." \_ -> #bindIO assertEqual
-  "hello" "hello" "String equality test" \_ -> #bindIO assertEqualInt 42 42
-  "Integer equality test" \_ -> #bindIO assertTrue #true "Boolean true test" \_
-  -> #bindIO assertFalse #false "Boolean false test" \_ -> #bindIO print "All
-  tests completed successfully" \_ -> #exit 0;

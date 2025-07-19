@@ -1,0 +1,6 @@
+trait Applicative (f :: * -> *) {
+  pure: forall a . (a -> f a),
+  apply: forall a b . (f (a -> b) -> (f a -> f b))
+}
+
+let applyInfix = \ff fa -> apply ff fa;

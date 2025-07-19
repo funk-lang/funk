@@ -1,0 +1,2 @@
+let intEq = \a b -> #intEq a b;
+let intSub = \a b -> #intSub a b;

@@ -552,7 +552,7 @@ expr =
 modulePath :: Parser ModulePath
 modulePath = do
   first <- fmap (Ident . unLocated) identTok
-  rest <- many (try (tok TokDot *> lookAhead identTok) *> tok TokDot *> fmap (Ident . unLocated) identTok)
+  rest <- many (try (tok TokDot *> fmap (Ident . unLocated) identTok))
   return $ ModulePath (first : rest)
 
 -- Parser for pub data statements
