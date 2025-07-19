@@ -51,27 +51,37 @@ identTok = tokenPrim show updatePos testTok <?> "identifier"
     testTok _ = Nothing
     updatePos _ (Located pos _) _ = pos
 
+primTok :: String -> Parser ()
+primTok expected =
+  tokenPrim show updatePos testTok
+  where
+    testTok (Located _ (TokPrim s))
+      | s == expected = Just ()
+      | otherwise = Nothing
+    testTok _ = Nothing
+    updatePos _ (Located pos _) _ = pos
+
 typeVar :: Parser PType
 typeVar = TVar . fmap Ident <$> identTok
 
 listType :: Parser PType
-listType = tok TokList *> (TList <$> atomicType)
+listType = primTok "#List" *> (TList <$> atomicType)
 
 unitType :: Parser PType
-unitType = tok TokUnit $> TUnit
+unitType = primTok "#Unit" $> TUnit
 
 stringType :: Parser PType
-stringType = tok TokStringType $> TString
+stringType = primTok "#String" $> TString
 
 intType :: Parser PType
-intType = tok TokIntType $> TInt
+intType = primTok "#Int" $> TInt
 
 boolType :: Parser PType
-boolType = tok TokBoolType $> TBool
+boolType = primTok "#Bool" $> TBool
 
 ioType :: Parser PType
 ioType = do
-  tok TokIOType
+  primTok "#IO"
   arg <- atomicType
   return (TIO arg)
 
@@ -157,7 +167,7 @@ varExpr = do
          in return $ QualifiedVar () modPath varName
 
 primUnitExpr :: Parser PExpr
-primUnitExpr = tok TokUnit $> PrimUnit ()
+primUnitExpr = primTok "#Unit" $> PrimUnit ()
 
 primStringExpr :: Parser PExpr
 primStringExpr = do
@@ -185,7 +195,7 @@ primFalseExpr = tok TokFalse $> PrimFalse ()
 
 primNilExpr :: Parser PExpr
 primNilExpr = do
-  tok TokNil
+  primTok "#nil"
   tok TokLBracket
   ty <- typeExpr
   tok TokRBracket
@@ -193,7 +203,7 @@ primNilExpr = do
 
 primConsExpr :: Parser PExpr
 primConsExpr = do
-  tok TokCons
+  primTok "#cons"
   tok TokLBracket
   ty <- typeExpr
   tok TokRBracket
@@ -203,90 +213,90 @@ primConsExpr = do
 primPrintExpr :: Parser PExpr
 primPrintExpr = 
   try (do
-    tok TokPrint
+    primTok "#print"
     arg <- atomicExpr
     return $ PrimPrint () arg
-  ) <|> (tok TokPrint $> PrimPrintValue ())
+  ) <|> (primTok "#print" $> PrimPrintValue ())
 
 primFmapIOExpr :: Parser PExpr
 primFmapIOExpr = 
   try (do
-    tok TokFmapIO
+    primTok "#fmapIO"
     f <- atomicExpr
     io <- atomicExpr
     return $ PrimFmapIO () f io
-  ) <|> (tok TokFmapIO $> PrimFmapIOValue ())
+  ) <|> (primTok "#fmapIO" $> PrimFmapIOValue ())
 
 primPureIOExpr :: Parser PExpr
 primPureIOExpr = 
   try (do
-    tok TokPureIO
+    primTok "#pureIO"
     arg <- atomicExpr
     return $ PrimPureIO () arg
-  ) <|> (tok TokPureIO $> PrimPureIOValue ())
+  ) <|> (primTok "#pureIO" $> PrimPureIOValue ())
 
 primApplyIOExpr :: Parser PExpr
 primApplyIOExpr = 
   try (do
-    tok TokApplyIO
+    primTok "#applyIO"
     iof <- atomicExpr
     iox <- atomicExpr
     return $ PrimApplyIO () iof iox
-  ) <|> (tok TokApplyIO $> PrimApplyIOValue ())
+  ) <|> (primTok "#applyIO" $> PrimApplyIOValue ())
 
 primBindIOExpr :: Parser PExpr
 primBindIOExpr = 
   try (do
-    tok TokBindIO
+    primTok "#bindIO"
     iox <- atomicExpr
     f <- atomicExpr
     return $ PrimBindIO () iox f
-  ) <|> (tok TokBindIO $> PrimBindIOValue ())
+  ) <|> (primTok "#bindIO" $> PrimBindIOValue ())
 
 primIntEqExpr :: Parser PExpr
 primIntEqExpr = 
   try (do
-    tok TokIntEq
+    primTok "#intEq"
     e1 <- atomicExpr
     e2 <- atomicExpr
     return $ PrimIntEq () e1 e2
-  ) <|> (tok TokIntEq $> PrimIntEqValue ())
+  ) <|> (primTok "#intEq" $> PrimIntEqValue ())
 
 primStringEqExpr :: Parser PExpr
 primStringEqExpr = 
   try (do
-    tok TokStringEq
+    primTok "#stringEq"
     e1 <- atomicExpr
     e2 <- atomicExpr
     return $ PrimStringEq () e1 e2
-  ) <|> (tok TokStringEq $> PrimStringEqValue ())
+  ) <|> (primTok "#stringEq" $> PrimStringEqValue ())
 
 primIfThenElseExpr :: Parser PExpr
 primIfThenElseExpr = 
   try (do
-    _ <- tok TokIfThenElse
+    _ <- primTok "#ifThenElse"
     c <- atomicExpr
     t <- atomicExpr
     e <- atomicExpr
     return $ PrimIfThenElse () c t e
-  ) <|> (tok TokIfThenElse $> PrimIfThenElseValue ())
+  ) <|> (primTok "#ifThenElse" $> PrimIfThenElseValue ())
 
 primIntSubExpr :: Parser PExpr
 primIntSubExpr = 
   try (do
-    _ <- tok TokIntSub
+    _ <- primTok "#intSub"
     e1 <- atomicExpr
     e2 <- atomicExpr
     return $ PrimIntSub () e1 e2
-  ) <|> (tok TokIntSub $> PrimIntSubValue ())
+  ) <|> (primTok "#intSub" $> PrimIntSubValue ())
 
 primExitExpr :: Parser PExpr
 primExitExpr = 
   try (do
-    tok TokExit
+    primTok "#exit"
     arg <- atomicExpr
     return $ PrimExit () arg
-  ) <|> (tok TokExit $> PrimExitValue ())
+  ) <|> (primTok "#exit" $> PrimExitValue ())
 
 parensExpr :: Parser PExpr
 parensExpr = tok TokLParen *> expr <* tok TokRParen
@@ -649,8 +659,8 @@ parseTopLevel = parse (topLevelBlock <* eof) ""
 primStringConcatExpr :: Parser PExpr
 primStringConcatExpr = 
   try (do
-    tok TokStringConcat
+    primTok "#stringConcat"
     e1 <- atomicExpr
     e2 <- atomicExpr
     return $ PrimStringConcat () e1 e2
-  ) <|> (tok TokStringConcat $> PrimStringConcatValue ())
+  ) <|> (primTok "#stringConcat" $> PrimStringConcatValue ())

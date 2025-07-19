@@ -50,25 +50,7 @@ data Token
   | TokMod
   | TokPub  
   | TokUse
-  | TokList
-  | TokUnit
-  | TokStringType
-  | TokIntType
-  | TokBoolType
-  | TokIOType
-  | TokNil
-  | TokCons
-  | TokPrint
-  | TokFmapIO
-  | TokPureIO
-  | TokApplyIO
-  | TokBindIO
-  | TokIntEq
-  | TokStringEq
-  | TokStringConcat
-  | TokIfThenElse
-  | TokIntSub
-  | TokExit
+  | TokPrim String
   deriving (Eq)
 
 instance Show Token where
@@ -76,6 +58,8 @@ instance Show Token where
     TokIdent _ -> "identifier"
     TokString _ -> "string literal"
     TokInt _ -> "integer literal"
+    TokTrue -> "'#true'"
+    TokFalse -> "'#false'"
     TokLambda -> "'\\'"
     TokForall -> "'forall'"
     TokArrow -> "'->'"
@@ -104,27 +88,7 @@ instance Show Token where
     TokMod -> "'mod'"
     TokPub -> "'pub'"
     TokUse -> "'use'"
-    TokList -> "'#List'"
-    TokUnit -> "'#Unit'"
-    TokStringType -> "'#String'"
-    TokIntType -> "'#Int'"
-    TokBoolType -> "'#Bool'"
-    TokIOType -> "'#IO'"
-    TokTrue -> "'#true'"
-    TokFalse -> "'#false'"
-    TokNil -> "'#nil'"
-    TokCons -> "'#cons'"
-    TokPrint -> "'#print'"
-    TokFmapIO -> "'#fmapIO'"
-    TokPureIO -> "'#pureIO'"
-    TokApplyIO -> "'#applyIO'"
-    TokBindIO -> "'#bindIO'"
-    TokIntEq -> "'#intEq'"
-    TokStringEq -> "'#stringEq'"
-    TokStringConcat -> "'#stringConcat'"
-    TokIfThenElse -> "'#ifThenElse'"
-    TokIntSub -> "'#intSub'"
-    TokExit -> "'#exit'"
+    TokPrim s -> "'" ++ s ++ "'"
 
 token :: Parser (Located Token)
 token = do
@@ -186,27 +150,9 @@ token = do
         "mod" -> TokMod
         "pub" -> TokPub
         "use" -> TokUse
-        "#List" -> TokList
-        "#Unit" -> TokUnit
-        "#String" -> TokStringType
-        "#Int" -> TokIntType
-        "#Bool" -> TokBoolType
-        "#IO" -> TokIOType
         "#true" -> TokTrue
         "#false" -> TokFalse
-        "#nil" -> TokNil
-        "#cons" -> TokCons
-        "#print" -> TokPrint
-        "#fmapIO" -> TokFmapIO
-        "#pureIO" -> TokPureIO
-        "#applyIO" -> TokApplyIO
-        "#bindIO" -> TokBindIO
-        "#intEq" -> TokIntEq
-        "#ifThenElse" -> TokIfThenElse
-        "#intSub" -> TokIntSub
-        "#stringEq" -> TokStringEq
-        "#stringConcat" -> TokStringConcat
-        "#exit" -> TokExit
+        s@('#':_) -> TokPrim s
         s -> TokIdent s
 
 tokenize :: String -> Either ParseError [Located Token]
@@ -215,3 +161,16 @@ tokenize = parse (many (token <* whitespace) <* eof) ""
     whitespace = skipMany (skipSpace <|> skipLineComment)
     skipSpace = void $ oneOf " \t\r\n"
     skipLineComment = void $ try (string "--") *> skipMany (noneOf "\n")
+
+-- | Check if a primitive string is supported
+isSupportedPrimitive :: String -> Bool
+isSupportedPrimitive = flip elem supportedPrimitives
+
+-- | List of all supported primitive strings
+supportedPrimitives :: [String]
+supportedPrimitives =
+  [ "#List", "#Unit", "#String", "#Int", "#Bool", "#IO"  -- Types
+  , "#nil", "#cons"                                      -- List operations
+  , "#print", "#fmapIO", "#pureIO", "#applyIO", "#bindIO" -- IO operations
+  , "#intEq", "#stringEq", "#stringConcat", "#ifThenElse", "#intSub", "#exit" -- Other operations
+  ]
