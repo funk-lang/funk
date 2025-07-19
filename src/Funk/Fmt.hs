@@ -9,10 +9,9 @@ import Funk.Term
 import Funk.Token
 import Text.Parsec (ParseError)
 
--- We'll need to import the colored error function from the main module
--- For now, let's define a simple version
+-- Simple error formatting
 showParseErrorPretty :: ParseError -> String -> String
-showParseErrorPretty err _ = show err  -- Fallback to simple show for now
+showParseErrorPretty err _ = show err
 
 -- Format a file or directory with the given options
 formatFile :: FmtOptions -> IO ()
@@ -74,63 +73,21 @@ data FmtOptions = FmtOptions
   , fmtInPlace :: Bool      -- Whether to modify files in place
   } deriving (Show)
 
--- Advanced formatter that produces clean source code with line length limits
+-- Main formatting function
 formatBlock :: Block PBinding -> String
-formatBlock block = formatContent $ prettifyBlock block
-  where
-    formatContent content = 
-      let lines' = lines content
-          processedLines = map (wrapLine 80) lines'
-          -- More permissive: only squash 3+ consecutive empty lines into 2
-          spacedLines = squashExcessiveEmptyLines processedLines
-      in unlines spacedLines
-    
-    -- Only squash 3+ consecutive empty lines, preserve 1-2 blank lines
-    squashExcessiveEmptyLines :: [String] -> [String]
-    squashExcessiveEmptyLines [] = []
-    squashExcessiveEmptyLines lines' = go lines' 0
-      where
-        go [] _ = []
-        go (x:xs) emptyCount
-          | isEmptyLine x = 
-              if emptyCount >= 2 
-                then go xs emptyCount  -- Skip this empty line (already have 2)
-                else x : go xs (emptyCount + 1)
-          | otherwise = x : go xs 0
-    
-    isEmptyLine :: String -> Bool
-    isEmptyLine = null . dropWhile (==' ')
-    
-    -- Wrap lines that exceed the maximum length
-    wrapLine :: Int -> String -> String
-    wrapLine maxLen line
-      | length line <= maxLen = line
-      | otherwise = 
-          let (prefix, suffix) = splitAt maxLen line
-              lastSpace = lastIndexOf ' ' prefix
-          in if lastSpace > 0
-             then take lastSpace prefix ++ "\n  " ++ wrapLine maxLen (drop (lastSpace + 1) line)
-             else line  -- Don't break if no good split point
-    
-    lastIndexOf :: Eq a => a -> [a] -> Int
-    lastIndexOf x xs = case elemIndices x xs of
-      [] -> -1
-      indices -> last indices
+formatBlock block = prettifyBlock block
 
--- Convert AST back to clean Funk source code
+-- Simple pretty printing function for blocks
 prettifyBlock :: Block PBinding -> String
 prettifyBlock (Block stmts expr) =
   let formattedStmts = map prettifyStmt stmts
-      -- Add sensible default spacing between declarations
       stmtsStr = intercalate "\n" $ addSensibleSpacing formattedStmts
-      -- Only add the expression if it's not just a Unit
       exprStr = case expr of
         PrimUnit _ -> ""
         _ -> prettifyExpr expr
   in if null exprStr then stmtsStr ++ "\n" else stmtsStr ++ "\n" ++ exprStr
 
--- Add sensible spacing: blank lines between all major declarations (traits, instances, data types)
--- but not between simple let bindings
+-- Add sensible spacing between declarations
 addSensibleSpacing :: [String] -> [String]
 addSensibleSpacing [] = []
 addSensibleSpacing [x] = [x]
@@ -140,15 +97,14 @@ addSensibleSpacing (x:y:xs) =
     else x : addSensibleSpacing (y:xs)
   where
     needsSpacing prev curr =
-      -- Add spacing between any major declarations
       (isMajorDecl prev && isMajorDecl curr) ||
-      -- Add spacing between major declarations and other statements
       (isMajorDecl prev && not (isMajorDecl curr)) ||
       (not (isMajorDecl prev) && isMajorDecl curr)
     
     isMajorDecl stmt = 
       any (`isPrefixOf` stmt) ["data ", "trait ", "instance "]
 
+-- Format statements with simple string-based approach
 prettifyStmt :: Stmt PBinding -> String
 prettifyStmt (Let _ (PBinding (Located _ (Ident name))) _ expr) =
   "let " ++ name ++ " = " ++ prettifyExpr expr ++ ";"
@@ -157,117 +113,130 @@ prettifyStmt (PubLet _ (PBinding (Located _ (Ident name))) _ expr) =
 prettifyStmt (Data _ constructors) =
   "data " ++ formatConstructors constructors
   where
-    formatConstructors [(Ident name, ty)] = name ++ " = " ++ prettifyTypeSimple ty
-    formatConstructors xs = intercalate " | " $ map (\(Ident name, ty) -> name ++ " " ++ prettifyTypeSimple ty) xs
+    formatConstructors [(Ident cname, ty)] = cname ++ " = " ++ prettifyType ty
+    formatConstructors xs = intercalate " | " $ map (\(Ident cname, ty) -> cname ++ " " ++ prettifyType ty) xs
 prettifyStmt (PubData _ constructors) =
   "pub data " ++ formatConstructors constructors
   where
-    formatConstructors [(Ident name, ty)] = name ++ " = " ++ prettifyTypeSimple ty
-    formatConstructors xs = intercalate " | " $ map (\(Ident name, ty) -> name ++ " " ++ prettifyTypeSimple ty) xs
+    formatConstructors [(Ident cname, ty)] = cname ++ " = " ++ prettifyType ty
+    formatConstructors xs = intercalate " | " $ map (\(Ident cname, ty) -> cname ++ " " ++ prettifyType ty) xs
 prettifyStmt (Trait name vars methods) =
-  "trait " ++ prettifyTypeVar name ++ " " ++ formatVars vars ++ " {\n" ++ formatMethods methods ++ "\n}"
+  "trait " ++ prettifyTypeVar name ++ " " ++ formatTraitVars vars ++ " {\n" ++ formatTraitMethods methods ++ "\n}"
   where
-    formatVars [] = ""
-    formatVars [var] = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
-    formatVars vars = intercalate " " $ map (\v -> "(" ++ prettifyTypeVar v ++ " :: * -> *)") vars
-    formatMethods [] = ""
-    formatMethods [method] = "  " ++ formatMethod method
-    formatMethods methods = intercalate ",\n" (map (("  " ++) . formatMethod) methods)
-    formatMethod (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatTraitVars [] = ""
+    formatTraitVars [var] = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
+    formatTraitVars vs = intercalate " " $ map (\v -> "(" ++ prettifyTypeVar v ++ " :: * -> *)") vs
+    formatTraitMethods [] = ""
+    formatTraitMethods [method] = "  " ++ formatTraitMethod method
+    formatTraitMethods ms = intercalate ",\n" (map (("  " ++) . formatTraitMethod) ms)
+    formatTraitMethod (Ident mname, ty) = mname ++ ": " ++ prettifyType ty
 prettifyStmt (PubTrait name vars methods) =
-  "pub trait " ++ prettifyTypeVar name ++ " " ++ formatVars vars ++ " {\n" ++ formatMethods methods ++ "\n}"
+  "pub trait " ++ prettifyTypeVar name ++ " " ++ formatTraitVars vars ++ " {\n" ++ formatTraitMethods methods ++ "\n}"
   where
-    formatVars [] = ""
-    formatVars [var] = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
-    formatVars vars = intercalate " " $ map (\v -> "(" ++ prettifyTypeVar v ++ " :: * -> *)") vars
-    formatMethods [] = ""
-    formatMethods [method] = "  " ++ formatMethod method
-    formatMethods methods = intercalate ",\n" (map (("  " ++) . formatMethod) methods)
-    formatMethod (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatTraitVars [] = ""
+    formatTraitVars [var] = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
+    formatTraitVars vs = intercalate " " $ map (\v -> "(" ++ prettifyTypeVar v ++ " :: * -> *)") vs
+    formatTraitMethods [] = ""
+    formatTraitMethods [method] = "  " ++ formatTraitMethod method
+    formatTraitMethods ms = intercalate ",\n" (map (("  " ++) . formatTraitMethod) ms)
+    formatTraitMethod (Ident mname, ty) = mname ++ ": " ++ prettifyType ty
 prettifyStmt (TraitWithKinds name vars methods) =
-  "trait " ++ prettifyTypeVar name ++ " " ++ formatVarsWithKinds vars ++ " {\n" ++ formatMethods methods ++ "\n}"
+  "trait " ++ prettifyTypeVar name ++ " " ++ formatKindedVars vars ++ " {\n" ++ formatTraitMethods methods ++ "\n}"
   where
-    formatVarsWithKinds [] = ""
-    formatVarsWithKinds vars = intercalate " " $ map formatVarWithKind vars
+    formatKindedVars [] = ""
+    formatKindedVars vs = intercalate " " $ map formatVarWithKind vs
     formatVarWithKind (var, Nothing) = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
     formatVarWithKind (var, Just kind) = "(" ++ prettifyTypeVar var ++ " :: " ++ prettifyKind kind ++ ")"
-    formatMethods [] = ""
-    formatMethods [method] = "  " ++ formatMethod method
-    formatMethods methods = intercalate ",\n" (map (("  " ++) . formatMethod) methods)
-    formatMethod (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatTraitMethods [] = ""
+    formatTraitMethods [method] = "  " ++ formatTraitMethod method
+    formatTraitMethods ms = intercalate ",\n" (map (("  " ++) . formatTraitMethod) ms)
+    formatTraitMethod (Ident mname, ty) = mname ++ ": " ++ prettifyType ty
 prettifyStmt (PubTraitWithKinds name vars methods) =
-  "pub trait " ++ prettifyTypeVar name ++ " " ++ formatVarsWithKinds vars ++ " {\n" ++ formatMethods methods ++ "\n}"
+  "pub trait " ++ prettifyTypeVar name ++ " " ++ formatKindedVars vars ++ " {\n" ++ formatTraitMethods methods ++ "\n}"
   where
-    formatVarsWithKinds [] = ""
-    formatVarsWithKinds vars = intercalate " " $ map formatVarWithKind vars
+    formatKindedVars [] = ""
+    formatKindedVars vs = intercalate " " $ map formatVarWithKind vs
     formatVarWithKind (var, Nothing) = "(" ++ prettifyTypeVar var ++ " :: * -> *)"
     formatVarWithKind (var, Just kind) = "(" ++ prettifyTypeVar var ++ " :: " ++ prettifyKind kind ++ ")"
-    formatMethods [] = ""
-    formatMethods [method] = "  " ++ formatMethod method
-    formatMethods methods = intercalate ",\n" (map (("  " ++) . formatMethod) methods)
-    formatMethod (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatTraitMethods [] = ""
+    formatTraitMethods [method] = "  " ++ formatTraitMethod method
+    formatTraitMethods ms = intercalate ",\n" (map (("  " ++) . formatTraitMethod) ms)
+    formatTraitMethod (Ident mname, ty) = mname ++ ": " ++ prettifyType ty
 prettifyStmt (Impl traitName vars ty methods) =
-  "instance " ++ prettifyTypeVar traitName ++ " " ++ formatVars vars ++ prettifyTypeSimple ty ++ " = {" ++ formatMethods methods ++ "}"
+  "instance " ++ prettifyTypeVar traitName ++ " " ++ formatImplVars vars ++ prettifyType ty ++ " = {" ++ formatImplMethods methods ++ "}"
   where
-    formatVars [] = ""
-    formatVars vars = "forall " ++ intercalate " " (map prettifyTypeVar vars) ++ " . "
-    formatMethods [] = ""
-    formatMethods [method] = formatMethod method
-    formatMethods methods = intercalate ", " (map formatMethod methods)
-    formatMethod (Ident name, expr) = name ++ " = " ++ prettifyExpr expr
+    formatImplVars [] = ""
+    formatImplVars vs = "forall " ++ intercalate " " (map prettifyTypeVar vs) ++ " . "
+    formatImplMethods [] = ""
+    formatImplMethods [method] = 
+      let formatted = formatImplMethod method
+      in if isComplexMethod formatted then "\n  " ++ formatted ++ "\n" else formatted
+    formatImplMethods ms = 
+      let formattedMethods = map formatImplMethod ms
+          hasComplexMethod = any isComplexMethod formattedMethods
+      in if hasComplexMethod
+         then "\n  " ++ intercalate ",\n  " formattedMethods ++ "\n"
+         else intercalate ", " formattedMethods
+    formatImplMethod (Ident mname, expr) = 
+      let exprStr = prettifyExpr expr
+      in mname ++ " = " ++ exprStr
+    isComplexMethod formatted = 
+      length formatted > 60 || 
+      '\n' `elem` formatted ||  
+      countWords formatted > 8  
+    countWords = length . words
 prettifyStmt (DataForall name vars fields) =
-  "data " ++ prettifyTypeVar name ++ " " ++ intercalate " " (map prettifyTypeVar vars) ++ " = {" ++ formatFields fields ++ "}"
+  "data " ++ prettifyTypeVar name ++ " " ++ intercalate " " (map prettifyTypeVar vars) ++ " = {" ++ formatDataFields fields ++ "}"
   where
-    formatFields [] = ""
-    formatFields [field] = formatField field
-    formatFields fields = intercalate ", " (map formatField fields)
-    formatField (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatDataFields [] = ""
+    formatDataFields [field] = formatDataField field
+    formatDataFields fs = intercalate ", " (map formatDataField fs)
+    formatDataField (Ident fname, ty) = fname ++ ": " ++ prettifyType ty
 prettifyStmt (PubDataForall name vars fields) =
-  "pub data " ++ prettifyTypeVar name ++ " " ++ intercalate " " (map prettifyTypeVar vars) ++ " = {" ++ formatFields fields ++ "}"
+  "pub data " ++ prettifyTypeVar name ++ " " ++ intercalate " " (map prettifyTypeVar vars) ++ " = {" ++ formatDataFields fields ++ "}"
   where
-    formatFields [] = ""
-    formatFields [field] = formatField field
-    formatFields fields = intercalate ", " (map formatField fields)
-    formatField (Ident name, ty) = name ++ ": " ++ prettifyTypeSimple ty
+    formatDataFields [] = ""
+    formatDataFields [field] = formatDataField field
+    formatDataFields fs = intercalate ", " (map formatDataField fs)
+    formatDataField (Ident fname, ty) = fname ++ ": " ++ prettifyType ty
 prettifyStmt (Use (ModulePath path) items) =
   "use " ++ intercalate "." (map (\(Ident i) -> i) path) ++ if null items then ".*;" else " {" ++ intercalate ", " (map (\(Ident i) -> i) items) ++ "};"
 prettifyStmt (UseAll (ModulePath path)) =
   "use " ++ intercalate "." (map (\(Ident i) -> i) path) ++ ".*;"
-prettifyStmt _ = "-- unsupported statement"  -- fallback
+prettifyStmt _ = "-- unsupported statement"
 
--- Helper functions for type formatting
-prettifyTypeSimple :: Show a => Type a -> String
-prettifyTypeSimple (TVar var) = show var
-prettifyTypeSimple (TForall var body) = 
-  let (vars, finalBody) = collectForalls [var] body
-  in "forall " ++ unwords (map show vars) ++ " . " ++ prettifyTypeSimple finalBody
+-- Simple type formatting
+prettifyType :: Show a => Type a -> String
+prettifyType (TVar var) = show var
+prettifyType (TForall var body) = 
+  let (vars, finalBody) = collectForallsLocal [var] body
+  in "forall " ++ unwords (map show vars) ++ " . " ++ prettifyType finalBody
   where
-    collectForalls acc (TForall v b) = collectForalls (acc ++ [v]) b
-    collectForalls acc b = (acc, b)
-prettifyTypeSimple (TArrow arg ret) = "(" ++ prettifyTypeSimple arg ++ " -> " ++ prettifyTypeSimple ret ++ ")"
-prettifyTypeSimple (TApp f arg) = prettifyTypeSimple f ++ " " ++ prettifyTypeSimple arg
-prettifyTypeSimple TUnit = "()"
-prettifyTypeSimple TString = "String"
-prettifyTypeSimple TInt = "Int"
-prettifyTypeSimple TBool = "Bool"
-prettifyTypeSimple (TList t) = "[" ++ prettifyTypeSimple t ++ "]"
-prettifyTypeSimple (TIO t) = "#IO " ++ prettifyTypeSimple t
-prettifyTypeSimple ty = show ty  -- Fallback for other types
+    collectForallsLocal acc (TForall v b) = collectForallsLocal (acc ++ [v]) b
+    collectForallsLocal acc b = (acc, b)
+prettifyType (TArrow arg ret) = "(" ++ prettifyType arg ++ " -> " ++ prettifyType ret ++ ")"
+prettifyType (TApp f arg) = prettifyType f ++ " " ++ prettifyType arg
+prettifyType TUnit = "()"
+prettifyType TString = "String"
+prettifyType TInt = "Int"
+prettifyType TBool = "Bool"
+prettifyType (TList t) = "[" ++ prettifyType t ++ "]"
+prettifyType (TIO t) = "#IO " ++ prettifyType t
+prettifyType ty = show ty
 
 prettifyTypeVar :: Show a => a -> String
-prettifyTypeVar var = show var  -- Simplified for now
+prettifyTypeVar var = show var
 
 prettifyKind :: Show a => Kind a -> String
 prettifyKind KStar = "*"
 prettifyKind (KArrow k1 k2) = prettifyKindAsArg k1 ++ " -> " ++ prettifyKind k2
 prettifyKind (KVar var) = show var
-prettifyKind kind = show kind  -- Fallback
 
--- Helper function to add parentheses only when needed for kind expressions
 prettifyKindAsArg :: Show a => Kind a -> String
 prettifyKindAsArg k@(KArrow _ _) = "(" ++ prettifyKind k ++ ")"
 prettifyKindAsArg k = prettifyKind k
 
+-- Simple expression formatting
 prettifyExpr :: Expr PBinding -> String
 prettifyExpr (Var _ (PBinding (Located _ (Ident name)))) = name
 prettifyExpr (QualifiedVar _ (ModulePath path) (PBinding (Located _ (Ident name)))) = 
@@ -277,23 +246,31 @@ prettifyExpr (Lam _ (PBinding (Located _ (Ident arg))) _ body) =
     Lam _ (PBinding (Located _ (Ident arg2))) _ body2 -> 
       "\\" ++ arg ++ " " ++ arg2 ++ " -> " ++ prettifyExpr body2
     _ -> "\\" ++ arg ++ " -> " ++ prettifyExpr body
-prettifyExpr (App _ func arg) =
-  case func of
-    -- Special case: if we're applying a second argument to #bindIO, treat it as one unit
-    App _ (PrimBindIOValue _) firstArg -> "#bindIO " ++ prettifyExprAsArg firstArg ++ " " ++ prettifyExprAsArg arg
-    -- Normal function application
-    _ -> prettifyExpr func ++ " " ++ prettifyExprAsArg arg
-prettifyExpr (TyApp _ expr _) = prettifyExpr expr  -- Skip type applications in output
-prettifyExpr (BlockExpr _ block) =
-  "{" ++ prettifyBlock block ++ "}"
-prettifyExpr (RecordType _ _ fields) =
-  "{" ++ intercalate ", " (map showField fields) ++ "}"
-  where
-    showField (Ident name, _) = name
+prettifyExpr (App _ func arg) = prettifyExpr func ++ " " ++ prettifyExprAsArg arg
+prettifyExpr (TyApp _ expr _) = prettifyExpr expr
+prettifyExpr (BlockExpr _ block) = "{" ++ prettifyBlock block ++ "}"
 prettifyExpr (RecordCreation _ expr fields) =
-  prettifyExpr expr ++ " {" ++ intercalate ", " (map showField fields) ++ "}"
+  let formattedFields = map showCreationField fields
+      hasComplexField = any isComplexField formattedFields
+      exprStr = prettifyExpr expr
+  in if hasComplexField
+     then exprStr ++ " {\n    " ++ intercalate ",\n    " formattedFields ++ "\n  }"
+     else exprStr ++ " {" ++ intercalate ", " formattedFields ++ "}"
   where
-    showField (Ident name, fieldExpr) = name ++ " = " ++ prettifyExpr fieldExpr
+    showCreationField (Ident fname, fieldExpr) = 
+      let exprStr = prettifyExpr fieldExpr
+          indentedExpr = if '\n' `elem` exprStr
+                        then case lines exprStr of
+                               [] -> exprStr
+                               (firstLine:restLines) -> 
+                                 let indentedRest = map ("  " ++) restLines
+                                 in unlines (firstLine : indentedRest)
+                        else exprStr
+      in fname ++ " = " ++ indentedExpr
+    isComplexField formatted = 
+      length formatted > 40 || 
+      '\n' `elem` formatted ||
+      length (words formatted) > 6
 prettifyExpr (TraitMethod _ _ _ _ (Ident name)) = name
 prettifyExpr (PrimUnit _) = "#Unit"
 prettifyExpr (PrimString _ s) = show s
@@ -302,94 +279,41 @@ prettifyExpr (PrimTrue _) = "#true"
 prettifyExpr (PrimFalse _) = "#false"
 prettifyExpr (PrimNil _ _) = "#Nil"
 prettifyExpr (PrimCons _ _ headExpr tailExpr) = "#Cons " ++ prettifyExprAsArg headExpr ++ " " ++ prettifyExprAsArg tailExpr
-prettifyExpr (PrimPrint _ arg) = "#print " ++ prettifyExprAsArg arg
-prettifyExpr (PrimFmapIO _ func io) = "#fmapIO " ++ prettifyExprAsArg func ++ " " ++ prettifyExprAsArg io
-prettifyExpr (PrimPureIO _ arg) = "#pureIO " ++ prettifyExprAsArg arg
-prettifyExpr (PrimApplyIO _ func io) = "#applyIO " ++ prettifyExprAsArg func ++ " " ++ prettifyExprAsArg io
-prettifyExpr (PrimBindIO _ io func) = "#bindIO " ++ prettifyExprAsArg io ++ " " ++ prettifyExprAsArg func
-prettifyExpr (PrimIntEq _ left right) = "#intEq " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
-prettifyExpr (PrimStringEq _ left right) = "#stringEq " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
-prettifyExpr (PrimStringConcat _ left right) = "#stringConcat " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
 prettifyExpr (PrimIfThenElse _ cond then' else') = 
   "#ifThenElse " ++ prettifyExprAsArg cond ++ "\n  " ++ prettifyExprAsArg then' ++ "\n  " ++ prettifyExprAsArg else'
+prettifyExpr (PrimBindIO _ io func) = "#bindIO " ++ prettifyExprAsArg io ++ " " ++ prettifyExprAsArg func
+prettifyExpr (PrimPrint _ arg) = "#print " ++ prettifyExprAsArg arg
+prettifyExpr (PrimIntEq _ left right) = "#intEq " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
 prettifyExpr (PrimIntSub _ left right) = "#intSub " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
+prettifyExpr (PrimStringEq _ left right) = "#stringEq " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
+prettifyExpr (PrimStringConcat _ left right) = "#stringConcat " ++ prettifyExprAsArg left ++ " " ++ prettifyExprAsArg right
+prettifyExpr (PrimPureIO _ arg) = "#pureIO " ++ prettifyExprAsArg arg
+prettifyExpr (PrimFmapIO _ func io) = "#fmapIO " ++ prettifyExprAsArg func ++ " " ++ prettifyExprAsArg io
+prettifyExpr (PrimApplyIO _ func io) = "#applyIO " ++ prettifyExprAsArg func ++ " " ++ prettifyExprAsArg io
 prettifyExpr (PrimExit _ arg) = "#exit " ++ prettifyExprAsArg arg
 -- Curried primitives
-prettifyExpr (PrimFmapIOValue _) = "#fmapIO"
-prettifyExpr (PrimPureIOValue _) = "#pureIO"
-prettifyExpr (PrimApplyIOValue _) = "#applyIO"
 prettifyExpr (PrimBindIOValue _) = "#bindIO"
+prettifyExpr (PrimIfThenElseValue _) = "#ifThenElse"
+prettifyExpr (PrimPrintValue _) = "#print"
 prettifyExpr (PrimIntEqValue _) = "#intEq"
+prettifyExpr (PrimIntSubValue _) = "#intSub"
 prettifyExpr (PrimStringEqValue _) = "#stringEq"
 prettifyExpr (PrimStringConcatValue _) = "#stringConcat"
-prettifyExpr (PrimIfThenElseValue _) = "#ifThenElse"
-prettifyExpr (PrimIntSubValue _) = "#intSub"
+prettifyExpr (PrimPureIOValue _) = "#pureIO"
+prettifyExpr (PrimFmapIOValue _) = "#fmapIO"
+prettifyExpr (PrimApplyIOValue _) = "#applyIO"
 prettifyExpr (PrimExitValue _) = "#exit"
-prettifyExpr (PrimPrintValue _) = "#print"
-prettifyExpr expr = "-- unsupported expression"  -- Fallback for any unhandled expressions
+prettifyExpr _ = "-- unsupported expression"
 
--- Helper function to determine if an expression needs parentheses when used as an argument
-needsParensAsArg :: Expr PBinding -> Bool
-needsParensAsArg (Lam _ _ _ _) = True  -- Lambda expressions always need parens
-needsParensAsArg _ = False
-
--- Expression precedence levels (higher number = higher precedence)
-exprPrecedence :: Expr PBinding -> Int
-exprPrecedence (Lam _ _ _ _) = 0      -- Lowest precedence
-exprPrecedence (PrimIfThenElse _ _ _ _) = 1  -- Conditionals are low precedence
-exprPrecedence (PrimBindIO _ _ _) = 2    -- Monadic bind
-exprPrecedence (PrimIntEq _ _ _) = 4     -- Comparison operators  
-exprPrecedence (PrimStringEq _ _ _) = 4  -- Comparison operators
-exprPrecedence (PrimIntSub _ _ _) = 6    -- Arithmetic operators
-exprPrecedence (PrimStringConcat _ _ _) = 6  -- String concatenation
-exprPrecedence (PrimFmapIO _ _ _) = 7    -- Map operations
-exprPrecedence (PrimApplyIO _ _ _) = 7   -- Apply operations
-exprPrecedence (App _ _ _) = 10       -- Function application (high precedence)
-exprPrecedence _ = 11  -- Atomic expressions (variables, literals, etc.) have highest precedence
-
--- Determine if an expression needs parentheses based on context
-needsParensInContext :: Int -> Expr PBinding -> Bool
-needsParensInContext contextPrecedence expr = exprPrecedence expr < contextPrecedence
-
--- Check if this is a problematic nested stringConcat pattern
-isProblematiStringConcat :: Expr PBinding -> Bool
-isProblematiStringConcat (App _ func _) = 
-  case func of
-    App _ (PrimStringConcatValue _) _ -> True
-    _ -> False
-isProblematiStringConcat _ = False
-
--- Helper function to add parentheses around complex expressions
-prettifyExprWithParens :: Expr PBinding -> String
-prettifyExprWithParens expr = 
-  if needsParensAsArg expr
-  then "(" ++ prettifyExpr expr ++ ")"
-  else prettifyExpr expr
-
--- Helper function for adding parentheses in function argument context  
+-- Helper function for adding parentheses when needed
 prettifyExprAsArg :: Expr PBinding -> String
 prettifyExprAsArg expr = 
   case expr of
-    -- Function applications need parentheses when used as arguments to other functions
     App _ _ _ -> "(" ++ prettifyExpr expr ++ ")"
-    -- Lambdas need parentheses  
     Lam _ _ _ _ -> "(" ++ prettifyExpr expr ++ ")"
-    -- Conditionals need parentheses
-    PrimIfThenElse _ _ _ _ -> "(" ++ prettifyExpr expr ++ ")"
-    -- Some binary operations may need parentheses depending on context
-    PrimIntSub _ _ _ -> "(" ++ prettifyExpr expr ++ ")"
-    PrimBindIO _ _ _ -> "(" ++ prettifyExpr expr ++ ")"
-    -- Atomic expressions don't need parentheses
     _ -> prettifyExpr expr
 
--- Smart application formatting with proper line breaks
-prettifyApp :: Expr PBinding -> Expr PBinding -> String
-prettifyApp func arg = 
-  -- Don't flatten applications when the argument is complex
-  -- This preserves the original parenthesized structure
-  prettifyExpr func ++ " " ++ prettifyExprWithParens arg
-
--- Recursively find all .funk files in a directory
+-- Find .funk files recursively
 findFunkFiles :: FilePath -> IO [FilePath]
 findFunkFiles path = do
   isDir <- doesDirectoryExist path
@@ -407,7 +331,6 @@ findFunkFiles path = do
         else return []
 
 -- Expand input paths to include all .funk files from directories
--- Fails if an explicitly specified file doesn't exist
 expandInputPaths :: [FilePath] -> IO (Either String [FilePath])
 expandInputPaths paths = do
   results <- forM paths $ \path -> do

@@ -1,1 +1,3 @@
-let ifThenElse = \cond thenVal elseVal -> #ifThenElse cond thenVal elseVal;
+let ifThenElse = \cond thenVal -> \elseVal -> #ifThenElse cond
+  thenVal
+  elseVal;

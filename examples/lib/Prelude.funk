@@ -17,11 +17,11 @@ let const = \x _ -> x;
 let flip = \f x -> \y -> f y x;
 let compose = \f g -> \x -> f (g x);
 let unit = #Unit;
-
 let intEq = \a b -> #intEq a b;
 let intSub = \a b -> #intSub a b;
-let ifThenElse = \cond thenVal elseVal -> #ifThenElse cond thenVal elseVal;
-
+let ifThenElse = \cond thenVal -> \elseVal -> #ifThenElse cond
+  thenVal
+  elseVal;
 let bindInfix = \ma f -> bind ma f;
 let sequence = \ma mb -> bind ma (\_ -> mb);
 let join = \mma -> bind mma (\ma -> ma);

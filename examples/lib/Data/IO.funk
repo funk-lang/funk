@@ -1,8 +1,22 @@
 data IO a = {unIO: #IO a}
 
-instance Functor IO = {fmap = \f fa -> IO {unIO = #fmapIO f (unIO fa)}}
-instance Applicative IO = {pure = \a -> IO {unIO = #pureIO a}, apply = \f a -> IO {unIO = #bindIO (#fmapIO (\fn -> #fmapIO fn a) f) (\x -> #pureIO x)}}
-instance Monad IO = {return = \a -> IO {unIO = #pureIO a}, bind = \m f -> IO {unIO = #bindIO (unIO m) (\x -> unIO (f x))}}
+instance Functor IO = {
+  fmap = \f fa -> IO {unIO = #fmapIO f (unIO fa)}
+}
+
+instance Applicative IO = {
+  pure = \a -> IO {unIO = #pureIO a},
+  apply = \f a -> IO {
+    unIO = #bindIO #fmapIO (\fn -> #fmapIO fn a) f (\x -> #pureIO x)
+  }
+}
+
+instance Monad IO = {
+  return = \a -> IO {unIO = #pureIO a},
+  bind = \m f -> IO {
+    unIO = #bindIO (unIO m) (\x -> unIO (f x))
+  }
+}
 
 let putStrLn = \s -> IO {unIO = #print s};
 let putStr = \s -> IO {unIO = #print s};
