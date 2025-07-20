@@ -1,0 +1,137 @@
+name: Nightly Build & Release
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      CABAL_BUILDDIR: dist-newstyle/build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Haskell
+        uses: haskell/actions/setup@v2
+        with:
+          ghc-version: 'latest'
+          cabal-version: 'latest'
+
+      - name: Update cabal packages
+        run: cabal update
+
+      - name: Build funkc
+        run: cabal build funkc
+
+      - name: Build funkvm
+        run: cabal build funkvm
+
+      - name: Find binaries
+        id: bin-paths
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            funkc_bin=$(find dist-newstyle -type f -name 'funkc.exe' | head -n 1)
+            funkvm_bin=$(find dist-newstyle -type f -name 'funkvm.exe' | head -n 1)
+          else
+            funkc_bin=$(find dist-newstyle -type f -name 'funkc' | head -n 1)
+            funkvm_bin=$(find dist-newstyle -type f -name 'funkvm' | head -n 1)
+          fi
+          echo "funkc_bin=$funkc_bin" >> $GITHUB_OUTPUT
+          echo "funkvm_bin=$funkvm_bin" >> $GITHUB_OUTPUT
+
+      - name: Rename binaries with platform suffix
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "${{ steps.bin-paths.outputs.funkc_bin }}" "release-artifacts/funkc-windows.exe"
+            cp "${{ steps.bin-paths.outputs.funkvm_bin }}" "release-artifacts/funkvm-windows.exe"
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            cp "${{ steps.bin-paths.outputs.funkc_bin }}" "release-artifacts/funkc-macos"
+            cp "${{ steps.bin-paths.outputs.funkvm_bin }}" "release-artifacts/funkvm-macos"
+          else
+            cp "${{ steps.bin-paths.outputs.funkc_bin }}" "release-artifacts/funkc-linux"
+            cp "${{ steps.bin-paths.outputs.funkvm_bin }}" "release-artifacts/funkvm-linux"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ runner.os }}
+          path: release-artifacts/*
+
+  release:
+    name: Create Combined Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect all binaries
+        run: |
+          mkdir -p release-binaries
+          find artifacts -name "*" -type f -exec cp {} release-binaries/ \;
+          ls -la release-binaries/
+
+      - name: Generate release date
+        id: date
+        run: |
+          RELEASE_DATE=$(date +'%d-%m-%Y')
+          echo "release_date=$RELEASE_DATE" >> $GITHUB_OUTPUT
+          echo "tag_name=nightly-$RELEASE_DATE" >> $GITHUB_OUTPUT
+
+      - name: Create release notes
+        id: notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          # Nightly Release ${{ steps.date.outputs.release_date }}
+          
+          This is an automated nightly build containing binaries for all supported platforms.
+          
+          ## Downloads
+          
+          ### funkc (Funk Compiler)
+          • **Linux**: `funkc-linux`
+          • **macOS**: `funkc-macos` 
+          • **Windows**: `funkc-windows.exe`
+          
+          ### funkvm (Funk Virtual Machine)
+          • **Linux**: `funkvm-linux`
+          • **macOS**: `funkvm-macos`
+          • **Windows**: `funkvm-windows.exe`
+          
+          ## Installation
+          
+          1. Download the appropriate binary for your platform
+          2. Make it executable (Linux/macOS): `chmod +x <binary-name>`
+          3. Add to your PATH or run directly
+          
+          ---
+          *Built from commit: ${{ github.sha }}*
+          EOF
+
+      - name: Release Nightly
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.date.outputs.tag_name }}
+          name: Nightly Release ${{ steps.date.outputs.release_date }}
+          prerelease: true
+          body_path: release_notes.md
+          files: release-binaries/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
