@@ -29,6 +29,21 @@ data CoreType
   | TyCon String                         -- Type constructors (State, etc.)
   deriving (Eq)
 
+-- | Core primitive operations
+data CorePrimitive
+  = PrimPrint                            -- Primitive print function
+  | PrimFmapIO                           -- Primitive fmap for IO
+  | PrimPureIO                           -- Primitive pure for IO
+  | PrimApplyIO                          -- Primitive apply for IO
+  | PrimBindIO                           -- Primitive bind for IO
+  | PrimIntEq                            -- Primitive int equality
+  | PrimStringEq                         -- Primitive string equality
+  | PrimStringConcat                     -- Primitive string concatenation
+  | PrimIfThenElse                       -- Primitive if/then/else
+  | PrimIntSub                           -- Primitive integer subtraction
+  | PrimExit                             -- Exit with code
+  deriving (Eq, Show)
+
 -- | Core expressions (System F terms)
 data CoreExpr
   = CoreVar Var                          -- Variables
@@ -50,29 +65,7 @@ data CoreExpr
   | CoreDictAccess CoreExpr String       -- Dictionary method access
   | CoreReturn CoreExpr                  -- IO return (pure value wrapped in IO)
   | CoreBind CoreExpr CoreExpr           -- IO bind (monadic sequencing)
-  | CorePrint CoreExpr                   -- Primitive print function
-  | CoreFmapIO CoreExpr CoreExpr         -- Primitive fmap for IO
-  | CorePureIO CoreExpr                  -- Primitive pure for IO
-  | CoreApplyIO CoreExpr CoreExpr        -- Primitive apply for IO
-  | CoreBindIO CoreExpr CoreExpr         -- Primitive bind for IO
-  | CoreIntEq CoreExpr CoreExpr          -- Primitive int equality
-  | CoreStringEq CoreExpr CoreExpr       -- Primitive string equality
-  | CoreStringConcat CoreExpr CoreExpr   -- Primitive string concatenation
-  | CoreIfThenElse CoreExpr CoreExpr CoreExpr -- Primitive if/then/else
-  | CoreIntSub CoreExpr CoreExpr         -- Primitive integer subtraction
-  | CoreExit CoreExpr                    -- Exit with code
-  -- Primitive values (for currying)
-  | CoreFmapIOValue                      -- Primitive fmap for IO as value
-  | CorePureIOValue                      -- Primitive pure for IO as value
-  | CoreApplyIOValue                     -- Primitive apply for IO as value
-  | CoreBindIOValue                      -- Primitive bind for IO as value
-  | CoreIntEqValue                       -- Primitive int equality as value
-  | CoreStringEqValue                    -- Primitive string equality as value
-  | CoreStringConcatValue                -- Primitive string concatenation as value
-  | CoreIfThenElseValue                  -- Primitive if/then/else as value
-  | CoreIntSubValue                      -- Primitive integer subtraction as value
-  | CoreExitValue                        -- Exit with code as value
-  | CorePrintValue                       -- Primitive print function as value
+  | CorePrim CorePrimitive [CoreExpr]    -- Primitive operations with arguments
   deriving (Eq)
 
 -- | Core patterns for case expressions
@@ -95,9 +88,36 @@ data CoreProgram = CoreProgram
   , coreMain :: CoreExpr  -- This should be of type IO ()
   } deriving (Eq)
 
+-- | Core module can be either a program with main or a library
+data CoreModule 
+  = CoreProgram' CoreProgram              -- Program with main function
+  | CoreLibrary [CoreDataType] [CoreBinding]  -- Library with data types and bindings
+  deriving (Eq)
+
+-- | Core binding (for libraries)
+data CoreBinding = CoreBinding
+  { bindingName :: String
+  , bindingType :: CoreType
+  , bindingExpr :: CoreExpr
+  } deriving (Eq)
+
 -- | Pretty printing for core types
 prettyTyVar :: TyVar -> Doc
 prettyTyVar (TyVar s) = text s
+
+-- | Pretty printing for core primitives
+prettyCorePrimitive :: CorePrimitive -> Doc
+prettyCorePrimitive PrimPrint = text "print"
+prettyCorePrimitive PrimFmapIO = text "fmapIO"
+prettyCorePrimitive PrimPureIO = text "pureIO"
+prettyCorePrimitive PrimApplyIO = text "applyIO"
+prettyCorePrimitive PrimBindIO = text "bindIO"
+prettyCorePrimitive PrimIntEq = text "intEq"
+prettyCorePrimitive PrimStringEq = text "stringEq"
+prettyCorePrimitive PrimStringConcat = text "stringConcat"
+prettyCorePrimitive PrimIfThenElse = text "ifThenElse"
+prettyCorePrimitive PrimIntSub = text "intSub"
+prettyCorePrimitive PrimExit = text "exit"
 
 prettyCoreType :: Int -> CoreType -> Doc
 prettyCoreType _ (CoreTyVar tv) = prettyTyVar tv
@@ -189,67 +209,12 @@ prettyCoreExpr p (CoreBind expr1 expr2) =
   let expr1' = prettyCoreExpr (p+1) expr1
       expr2' = prettyCoreExpr (p+1) expr2
   in parensIf (p > 0) (expr1' <+> text ">>=" <+> expr2')
-prettyCoreExpr p (CorePrint expr) =
-  let expr' = prettyCoreExpr (p+1) expr
-  in parensIf (p > 0) (text "print" <+> expr')
-prettyCoreExpr p (CoreFmapIO f io) =
-  let f' = prettyCoreExpr (p+1) f
-      io' = prettyCoreExpr (p+1) io
-  in parensIf (p > 0) (text "fmapIO" <+> f' <+> io')
-prettyCoreExpr p (CorePureIO expr) =
-  let expr' = prettyCoreExpr (p+1) expr
-  in parensIf (p > 0) (text "pureIO" <+> expr')
-prettyCoreExpr p (CoreApplyIO iof iox) =
-  let iof' = prettyCoreExpr (p+1) iof
-      iox' = prettyCoreExpr (p+1) iox
-  in parensIf (p > 0) (text "applyIO" <+> iof' <+> iox')
-prettyCoreExpr p (CoreBindIO iox f) =
-  let iox' = prettyCoreExpr (p+1) iox
-      f' = prettyCoreExpr (p+1) f
-  in parensIf (p > 0) (text "bindIO" <+> iox' <+> f')
-
-prettyCoreExpr p (CoreIntEq e1 e2) =
-  let e1' = prettyCoreExpr (p+1) e1
-      e2' = prettyCoreExpr (p+1) e2
-  in parensIf (p > 0) (text "intEq" <+> e1' <+> e2')
-
-prettyCoreExpr p (CoreStringEq e1 e2) =
-  let e1' = prettyCoreExpr (p+1) e1
-      e2' = prettyCoreExpr (p+1) e2
-  in parensIf (p > 0) (text "stringEq" <+> e1' <+> e2')
-
-prettyCoreExpr p (CoreStringConcat e1 e2) =
-  let e1' = prettyCoreExpr (p+1) e1
-      e2' = prettyCoreExpr (p+1) e2
-  in parensIf (p > 0) (text "stringConcat" <+> e1' <+> e2')
-
-prettyCoreExpr p (CoreIfThenElse c t e) =
-  let c' = prettyCoreExpr (p+1) c
-      t' = prettyCoreExpr (p+1) t
-      e' = prettyCoreExpr (p+1) e
-  in parensIf (p > 0) (text "if" <+> c' <+> text "then" <+> t' <+> text "else" <+> e')
-
-prettyCoreExpr p (CoreIntSub e1 e2) =
-  let e1' = prettyCoreExpr (p+1) e1
-      e2' = prettyCoreExpr (p+1) e2
-  in parensIf (p > 0) (text "intSub" <+> e1' <+> e2')
-
-prettyCoreExpr p (CoreExit e) =
-  let e' = prettyCoreExpr (p+1) e
-  in parensIf (p > 0) (text "exit" <+> e')
-
--- Primitive values (for currying)
-prettyCoreExpr _ CoreFmapIOValue = text "fmapIO"
-prettyCoreExpr _ CorePureIOValue = text "pureIO"
-prettyCoreExpr _ CoreApplyIOValue = text "applyIO"
-prettyCoreExpr _ CoreBindIOValue = text "bindIO"
-prettyCoreExpr _ CoreIntEqValue = text "intEq"
-prettyCoreExpr _ CoreStringEqValue = text "stringEq"
-prettyCoreExpr _ CoreStringConcatValue = text "stringConcat"
-prettyCoreExpr _ CoreIfThenElseValue = text "ifThenElse"
-prettyCoreExpr _ CoreIntSubValue = text "intSub"
-prettyCoreExpr _ CoreExitValue = text "exit"
-prettyCoreExpr _ CorePrintValue = text "print"
+prettyCoreExpr p (CorePrim prim args) =
+  let prim' = prettyCorePrimitive prim
+      args' = map (prettyCoreExpr (p+1)) args
+  in case args of
+       [] -> text "#" <> prim'  -- Primitive value (partially applied)
+       _  -> parensIf (p > 0) ((text "#" <> prim') <+> hsep args')
 
 prettyAlt :: (CorePat, CoreExpr) -> Doc
 prettyAlt (pat, expr) =
@@ -281,6 +246,19 @@ prettyCoreProgram (CoreProgram datatypes main) =
       main' = prettyCoreExpr 0 main
   in datatypes' $$ text "" $$ main'
 
+-- | Pretty printing for core modules
+prettyCoreModule :: CoreModule -> Doc
+prettyCoreModule (CoreProgram' prog) = prettyCoreProgram prog
+prettyCoreModule (CoreLibrary datatypes bindings) =
+  let datatypes' = vcat $ map prettyCoreDataType datatypes
+      bindings' = vcat $ map prettyCoreBinding bindings
+  in datatypes' $$ bindings'
+
+-- | Pretty printing for core bindings
+prettyCoreBinding :: CoreBinding -> Doc
+prettyCoreBinding (CoreBinding name ty expr) =
+  text "let" <+> text name <+> text ":" <+> prettyCoreType 0 ty <+> text "=" <+> prettyCoreExpr 0 expr
+
 -- | Helper function for parentheses
 parensIf :: Bool -> Doc -> Doc
 parensIf True = parens
@@ -295,3 +273,9 @@ instance Show CoreExpr where
 
 instance Show CoreProgram where
   show = render . prettyCoreProgram
+
+instance Show CoreModule where
+  show = render . prettyCoreModule
+
+instance Show CoreBinding where
+  show = render . prettyCoreBinding

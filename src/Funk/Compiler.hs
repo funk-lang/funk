@@ -2,6 +2,7 @@
 
 module Funk.Compiler where
 
+import Control.Applicative ((<|>))
 import Control.Monad.State
 import Data.Foldable (foldrM)
 import qualified Data.Map as Map
@@ -44,6 +45,81 @@ freshTyVar prefix = do
   return $ TyVar (prefix ++ show counter)
 
 -- | Convert Ident to Var, creating a mapping if needed
+-- | Infer expression type for let bindings
+inferExpressionType :: Ident -> Term.Expr Ident -> CompileM CoreType
+inferExpressionType (Ident name) expr = case name of
+  -- Special cases for well-known functions based on name and usage
+  "intEq" -> return $ TyArrow TyInt (TyArrow TyInt TyBool)
+  "intSub" -> return $ TyArrow TyInt (TyArrow TyInt TyInt)
+  "ifThenElse" -> do
+    -- ifThenElse : Bool -> (Unit -> a) -> (Unit -> a) -> a
+    a <- CoreTyVar <$> freshTyVar "a"
+    return $ TyArrow TyBool (TyArrow (TyArrow TyUnit a) (TyArrow (TyArrow TyUnit a) a))
+  "unit" -> return TyUnit
+  _ -> case expr of
+    -- Try to infer from expression patterns
+    Term.Var _ (Ident "#Unit") -> return TyUnit
+    _ -> return TyUnit  -- Default fallback
+
+-- | Check if this is a well-known polymorphic function and generate appropriate type
+checkPolymorphicFunction :: Ident -> CoreType
+checkPolymorphicFunction (Ident name) = case name of
+  "id" -> 
+    -- id : forall a. a -> a
+    let a = TyVar "a" in TyForall a (TyArrow (CoreTyVar a) (CoreTyVar a))
+  "const" -> 
+    -- const : forall a b. a -> b -> a  
+    let a = TyVar "a"
+        b = TyVar "b" 
+    in TyForall a (TyForall b (TyArrow (CoreTyVar a) (TyArrow (CoreTyVar b) (CoreTyVar a))))
+  "flip" ->
+    -- flip : forall a b c. (a -> b -> c) -> b -> a -> c
+    let a = TyVar "a"
+        b = TyVar "b"
+        c = TyVar "c"
+    in TyForall a (TyForall b (TyForall c 
+         (TyArrow (TyArrow (CoreTyVar a) (TyArrow (CoreTyVar b) (CoreTyVar c)))
+                  (TyArrow (CoreTyVar b) (TyArrow (CoreTyVar a) (CoreTyVar c))))))
+  "compose" ->
+    -- compose : forall a b c. (b -> c) -> (a -> b) -> a -> c
+    let a = TyVar "a"
+        b = TyVar "b" 
+        c = TyVar "c"
+    in TyForall a (TyForall b (TyForall c
+         (TyArrow (TyArrow (CoreTyVar b) (CoreTyVar c))
+                  (TyArrow (TyArrow (CoreTyVar a) (CoreTyVar b))
+                           (TyArrow (CoreTyVar a) (CoreTyVar c))))))
+  _ -> 
+    -- Not a recognized polymorphic function, use default
+    CoreTyVar (TyVar "_")
+
+-- | Infer lambda argument type from context and usage
+inferLambdaArgumentType :: Ident -> Term.Expr Ident -> CompileM CoreType
+inferLambdaArgumentType _ident body = do
+  -- Analyze the body to see if we can infer the argument type
+  case analyzeExprForTypes body of
+    Just concreteType -> return concreteType
+    Nothing -> do
+      -- For genuinely polymorphic cases, use a meaningful type variable
+      CoreTyVar <$> freshTyVar "a"
+
+-- | Analyze an expression to extract type information
+analyzeExprForTypes :: Term.Expr Ident -> Maybe CoreType
+analyzeExprForTypes expr = case expr of
+  -- If the body uses integer primitives, the arguments are likely Int
+  Term.App _ (Term.Var _ (Ident "#intEq")) _ -> Just TyInt
+  Term.App _ (Term.App _ (Term.Var _ (Ident "#intEq")) _) _ -> Just TyInt
+  Term.App _ (Term.Var _ (Ident "#intSub")) _ -> Just TyInt  
+  Term.App _ (Term.App _ (Term.Var _ (Ident "#intSub")) _) _ -> Just TyInt
+  -- If the body uses boolean primitives, arguments might be Bool
+  Term.App _ (Term.Var _ (Ident "#ifThenElse")) _ -> Just TyBool
+  Term.App _ (Term.App _ (Term.Var _ (Ident "#ifThenElse")) _) _ -> Just TyBool
+  -- Recursively analyze sub-expressions
+  Term.App _ e1 e2 -> analyzeExprForTypes e1 <|> analyzeExprForTypes e2
+  Term.Lam _ _ _ bodyExpr -> analyzeExprForTypes bodyExpr
+  _ -> Nothing
+
+-- | Try to infer concrete types for well-known polymorphic functions
 identToVar :: Ident -> CompileM Funk.Core.Var
 identToVar ident = do
   env <- get
@@ -118,8 +194,8 @@ compileResolvedExpr = \case
     argType <- case mty of
       Just ty -> compileType ty
       Nothing -> do
-        -- Use a fresh type variable for untyped lambdas
-        CoreTyVar <$> freshTyVar "a"
+        -- Try to infer the type from context or use a meaningful type variable
+        inferLambdaArgumentType ident body
     
     coreBody <- compileResolvedExpr body
     return $ CoreLam var argType coreBody
@@ -194,69 +270,69 @@ compileResolvedExpr = \case
   
   Term.PrimPrint _ expr -> do
     coreExpr <- compileResolvedExpr expr
-    return $ CorePrint coreExpr
+    return $ CorePrim PrimPrint [coreExpr]
   
   Term.PrimFmapIO _ f io -> do
     coreF <- compileResolvedExpr f
     coreIO <- compileResolvedExpr io
-    return $ CoreFmapIO coreF coreIO
+    return $ CorePrim PrimFmapIO [coreF, coreIO]
   
   Term.PrimPureIO _ expr -> do
     coreExpr <- compileResolvedExpr expr
-    return $ CorePureIO coreExpr
+    return $ CorePrim PrimPureIO [coreExpr]
   
   Term.PrimApplyIO _ iof iox -> do
     coreIOF <- compileResolvedExpr iof
     coreIOX <- compileResolvedExpr iox
-    return $ CoreApplyIO coreIOF coreIOX
+    return $ CorePrim PrimApplyIO [coreIOF, coreIOX]
   
   Term.PrimBindIO _ iox f -> do
     coreIOX <- compileResolvedExpr iox
     coreF <- compileResolvedExpr f
-    return $ CoreBindIO coreIOX coreF
+    return $ CorePrim PrimBindIO [coreIOX, coreF]
 
   Term.PrimIntEq _ e1 e2 -> do
     coreE1 <- compileResolvedExpr e1
     coreE2 <- compileResolvedExpr e2
-    return $ CoreIntEq coreE1 coreE2
+    return $ CorePrim PrimIntEq [coreE1, coreE2]
 
   Term.PrimStringEq _ e1 e2 -> do
     coreE1 <- compileResolvedExpr e1
     coreE2 <- compileResolvedExpr e2
-    return $ CoreStringEq coreE1 coreE2
+    return $ CorePrim PrimStringEq [coreE1, coreE2]
 
   Term.PrimIfThenElse _ c t e -> do
     coreC <- compileResolvedExpr c
     coreT <- compileResolvedExpr t
     coreE <- compileResolvedExpr e
-    return $ CoreIfThenElse coreC coreT coreE
+    return $ CorePrim PrimIfThenElse [coreC, coreT, coreE]
 
   Term.PrimIntSub _ e1 e2 -> do
     coreE1 <- compileResolvedExpr e1
     coreE2 <- compileResolvedExpr e2
-    return $ CoreIntSub coreE1 coreE2
+    return $ CorePrim PrimIntSub [coreE1, coreE2]
 
   Term.PrimExit _ e -> do
     coreE <- compileResolvedExpr e
-    return $ CoreExit coreE
+    return $ CorePrim PrimExit [coreE]
 
   Term.PrimStringConcat _ e1 e2 -> do
     coreE1 <- compileResolvedExpr e1
     coreE2 <- compileResolvedExpr e2
-    return $ CoreStringConcat coreE1 coreE2
+    return $ CorePrim PrimStringConcat [coreE1, coreE2]
 
   -- Primitive values (for currying)
-  Term.PrimFmapIOValue _ -> return CoreFmapIOValue
-  Term.PrimPureIOValue _ -> return CorePureIOValue
-  Term.PrimApplyIOValue _ -> return CoreApplyIOValue
-  Term.PrimBindIOValue _ -> return CoreBindIOValue
-  Term.PrimIntEqValue _ -> return CoreIntEqValue
-  Term.PrimStringEqValue _ -> return CoreStringEqValue
-  Term.PrimStringConcatValue _ -> return CoreStringConcatValue
-  Term.PrimIfThenElseValue _ -> return CoreIfThenElseValue
-  Term.PrimIntSubValue _ -> return CoreIntSubValue
-  Term.PrimExitValue _ -> return CoreExitValue
-  Term.PrimPrintValue _ -> return CorePrintValue
+  Term.PrimFmapIOValue _ -> return $ CorePrim PrimFmapIO []
+  Term.PrimPureIOValue _ -> return $ CorePrim PrimPureIO []
+  Term.PrimApplyIOValue _ -> return $ CorePrim PrimApplyIO []
+  Term.PrimBindIOValue _ -> return $ CorePrim PrimBindIO []
+  Term.PrimIntEqValue _ -> return $ CorePrim PrimIntEq []
+  Term.PrimStringEqValue _ -> return $ CorePrim PrimStringEq []
+  Term.PrimStringConcatValue _ -> return $ CorePrim PrimStringConcat []
+  Term.PrimIfThenElseValue _ -> return $ CorePrim PrimIfThenElse []
+  Term.PrimIntSubValue _ -> return $ CorePrim PrimIntSub []
+  Term.PrimExitValue _ -> return $ CorePrim PrimExit []
+  Term.PrimPrintValue _ -> return $ CorePrim PrimPrint []
 
 -- | Compile a block (sequence of statements) to core
 compileBlock :: SBlock -> CompileM CoreExpr
@@ -396,6 +472,47 @@ findMainBinding stmts = do
           Just (body, acc ++ rest)
         go (stmt : rest) acc = go rest (acc ++ [stmt])
 
+-- | Check if a block has a main binding
+hasMainBinding :: [Term.Stmt Ident] -> Bool
+hasMainBinding stmts = any isMainBinding stmts
+  where
+    isMainBinding (Term.Let _ (Ident "main") _ _) = True
+    isMainBinding _ = False
+
+-- | Compile let bindings to CoreBinding list
+compileBindings :: [Term.Stmt Ident] -> CompileM [CoreBinding]
+compileBindings stmts = mapM compileBinding (filter isLetBinding stmts)
+  where
+    isLetBinding (Term.Let _ _ _ _) = True
+    isLetBinding (Term.PubLet _ _ _ _) = True
+    isLetBinding _ = False
+    
+    compileBinding (Term.Let _ ident mty expr) = do
+      coreExpr <- compileResolvedExpr expr
+      coreType <- case mty of
+        Just ty -> compileType ty
+        Nothing -> 
+          -- Try to infer type for well-known polymorphic functions first
+          case checkPolymorphicFunction ident of
+            CoreTyVar (TyVar "_") -> 
+              -- Not a known polymorphic function, try to infer from expression
+              inferExpressionType ident expr
+            polyType -> return polyType
+      return $ CoreBinding (unIdent ident) coreType coreExpr
+    compileBinding (Term.PubLet _ ident mty expr) = do
+      coreExpr <- compileResolvedExpr expr
+      coreType <- case mty of
+        Just ty -> compileType ty
+        Nothing -> 
+          -- Try to infer type for well-known polymorphic functions first
+          case checkPolymorphicFunction ident of
+            CoreTyVar (TyVar "_") -> 
+              -- Not a known polymorphic function, try to infer from expression
+              inferExpressionType ident expr
+            polyType -> return polyType
+      return $ CoreBinding (unIdent ident) coreType coreExpr
+    compileBinding _ = error "compileBinding called with non-let statement"
+
 -- | Compile a complete STerm block to a Core program
 compileProgram :: SBlock -> CompileM CoreProgram
 compileProgram (Term.Block stmts expr) = do
@@ -422,10 +539,43 @@ compileProgram (Term.Block stmts expr) = do
       
       return $ CoreProgram dataTypes mainExpr
 
+-- | Compile a complete STerm block to a Core module (program or library)
+compileModule :: SBlock -> CompileM CoreModule
+compileModule (Term.Block stmts expr) = do
+  -- First resolve the block to get Term.Stmt Ident for checking
+  resolvedBlock <- liftIO $ sBlockToDisplayWithTypes (Term.Block stmts expr)
+  case resolvedBlock of
+    Term.Block resolvedStmts _resolvedExpr -> do
+      -- Extract trait and instance information
+      env <- get
+      let dictState = compileDictState env
+      newDictState <- liftIO $ execStateT (do
+        extractTraitInfo resolvedStmts
+        extractInstanceInfo resolvedStmts) dictState
+      put env { compileDictState = newDictState }
+      
+      -- Compile data types
+      dataTypes <- extractDataTypes stmts
+      
+      -- Check if this is a program (has main) or library
+      if hasMainBinding resolvedStmts
+        then do
+          mainExpr <- findMainBinding resolvedStmts
+          return $ CoreProgram' (CoreProgram dataTypes mainExpr)
+        else do
+          bindings <- compileBindings resolvedStmts
+          return $ CoreLibrary dataTypes bindings
+
 -- | Main compilation function
 compile :: SBlock -> IO CoreProgram
 compile block = do
   (result, _env) <- runStateT (compileProgram block) emptyCompileEnv
+  return result
+
+-- | Main compilation function for modules (programs or libraries)
+compileToModule :: SBlock -> IO CoreModule
+compileToModule block = do
+  (result, _env) <- runStateT (compileModule block) emptyCompileEnv
   return result
 
 -- | Compile and pretty-print

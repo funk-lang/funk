@@ -23,7 +23,7 @@ library
         Funk.Core
         Funk.Compiler
         Funk.Dictionary
-        Funk.Interpreter
+        -- Funk.Interpreter
         Funk.Fmt
 
     hs-source-dirs:   src

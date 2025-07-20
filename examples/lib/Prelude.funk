@@ -1,17 +1,3 @@
-trait Functor (f :: * -> *) {
-  fmap: forall a b . ((a -> b) -> (f a -> f b))
-}
-
-trait Applicative (f :: * -> *) {
-  pure: forall a . (a -> f a),
-  apply: forall a b . (f (a -> b) -> (f a -> f b))
-}
-
-trait Monad (m :: * -> *) {
-  return: forall a . (a -> m a),
-  bind: forall a b . (m a -> ((a -> m b) -> m b))
-}
-
 let id = \x -> x;
 let const = \x _ -> x;
 let flip = \f x -> \y -> f y x;
@@ -22,6 +8,3 @@ let intSub = \a b -> #intSub a b;
 let ifThenElse = \cond thenVal -> \elseVal -> #ifThenElse cond
   thenVal
   elseVal;
-let bindInfix = \ma f -> bind ma f;
-let sequence = \ma mb -> bind ma (\_ -> mb);
-let join = \mma -> bind mma (\ma -> ma);

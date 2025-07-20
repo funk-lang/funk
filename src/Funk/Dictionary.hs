@@ -4,15 +4,36 @@ module Funk.Dictionary where
 
 import qualified Data.Map as Map
 import Control.Monad.State
+import Data.Maybe (fromMaybe)
 
 import Funk.Core
 import Funk.Term (Ident(..), unIdent)
 import qualified Funk.Term as Term
 
+-- | Trait method signature
+data TraitMethod = TraitMethod
+  { methodName :: String
+  , methodType :: Term.Type Ident
+  } deriving (Show, Eq)
+
+-- | Trait definition
+data TraitDef = TraitDef
+  { traitName :: String
+  , traitTypeParam :: String
+  , traitMethods :: [TraitMethod]
+  } deriving (Show, Eq)
+
+-- | Instance definition  
+data InstanceDef = InstanceDef
+  { instanceTrait :: String
+  , instanceType :: String
+  , instanceMethods :: Map.Map String CoreExpr
+  } deriving (Show, Eq)
+
 -- | Dictionary transformation state
 data DictState = DictState
-  { dictTraits :: Map.Map String (String, [String])  -- trait name -> (type param, method names)
-  , dictInstances :: Map.Map (String, String) [CoreExpr]  -- (trait, type) -> method implementations
+  { dictTraits :: Map.Map String TraitDef
+  , dictInstances :: Map.Map (String, String) InstanceDef  -- (trait, type) -> instance
   , dictCounter :: Int
   } deriving (Show)
 
@@ -28,11 +49,13 @@ extractTraitInfo stmts = do
   where
     extractFromStmt :: Term.Stmt Ident -> DictM ()
     extractFromStmt = \case
-      Term.Trait traitName _typeVars methods -> do
-        let traitNameStr = unIdent traitName
-        let methodNames = map (unIdent . fst) methods
+      Term.Trait traitIdent _typeVars methods -> do
+        let traitNameStr = unIdent traitIdent
+        let traitMethods = map (\(methodIdent, methodTy) -> 
+              TraitMethod (unIdent methodIdent) methodTy) methods
+        let traitDef = TraitDef traitNameStr "f" traitMethods
         dictState <- get
-        put dictState { dictTraits = Map.insert traitNameStr ("f", methodNames) (dictTraits dictState) }
+        put dictState { dictTraits = Map.insert traitNameStr traitDef (dictTraits dictState) }
       _ -> return ()
 
 -- | Extract instance definitions from statements
@@ -50,8 +73,14 @@ extractInstanceInfo stmts = do
               _ -> "Unknown"
         -- Convert method implementations to core expressions
         methodImpls <- mapM (compileMethodImpl . snd) methods
+        let methodMap = Map.fromList $ zip (map (unIdent . fst) methods) methodImpls
+        let instanceDef = InstanceDef {
+              instanceTrait = traitNameStr,
+              instanceType = instanceTypeStr,
+              instanceMethods = methodMap
+            }
         dictState <- get
-        put dictState { dictInstances = Map.insert (traitNameStr, instanceTypeStr) methodImpls (dictInstances dictState) }
+        put dictState { dictInstances = Map.insert (traitNameStr, instanceTypeStr) instanceDef (dictInstances dictState) }
       _ -> return ()
     
     compileMethodImpl :: Term.Expr Ident -> DictM CoreExpr
@@ -96,8 +125,9 @@ generateDictConstructor :: String -> String -> DictM CoreExpr
 generateDictConstructor traitName typeName = do
   dictState <- get
   case Map.lookup (traitName, typeName) (dictInstances dictState) of
-    Just methods -> do
+    Just instanceDef -> do
       let targetType = TyCon typeName
+      let methods = Map.elems (instanceMethods instanceDef)
       return $ CoreDict traitName targetType methods
     Nothing -> do
       -- Create a placeholder dictionary
