@@ -1,2 +1,5 @@
 dist-newstyle/
 target/
+build-output/
+nested-output/
+clean-output/

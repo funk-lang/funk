@@ -1,36 +1,34 @@
 cabal-version:   3.0
-name:            funk
+name:            funkc
 version:         0.1.0
 license:         Apache-2.0
-license-file:    LICENSE
+license-file:    ../../LICENSE
 maintainer:      matt@hunzinger.me
 author:          Matt Hunzinger
 build-type:      Simple
-extra-doc-files: CHANGELOG.md
+synopsis:        Compiler for the Funk programming language
 
 library
     exposed-modules:
-        Funk
-        Funk.Fresh
-        Funk.Infer
-        Funk.KindInfer
         Funk.Parser
+        Funk.Infer
         Funk.Solver
-        Funk.STerm
-        Funk.Subst
-        Funk.Term
-        Funk.Token
-        Funk.Core
+        Funk.KindInfer
         Funk.Compiler
         Funk.Dictionary
-        -- Funk.Interpreter
+        Funk.Subst
         Funk.Fmt
+        Funk.Token
+        Funk.STerm
+        Funk.Fresh
+        Funk
 
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options:      -Wall
     build-depends:
         base >=4,
+        funk-core,
         ansi-terminal,
         containers,
         directory,
@@ -40,27 +38,11 @@ library
         parsec,
         pretty
 
-executable funk
+executable funkc
     main-is:          Main.hs
     hs-source-dirs:   app
     default-language: Haskell2010
     ghc-options:      -Wall
     build-depends:
         base >=4,
-        funk
-
-test-suite funk-test
-    type:             exitcode-stdio-1.0
-    main-is:          Main.hs
-    other-modules:    
-        Funk.TokenSpec
-        Funk.ParserSpec
-        Funk.SimpleSpec
-    hs-source-dirs:   test
-    default-language: Haskell2010
-    ghc-options:      -Wall
-    build-depends:
-        base >=4,
-        funk,
-        hspec >=2.7,
-        parsec
+        funkc

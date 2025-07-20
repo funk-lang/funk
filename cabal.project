@@ -1,0 +1,13 @@
+packages:
+  packages/funk-core
+  packages/funkc
+  packages/funkvm
+
+package funk-core
+  documentation: False
+
+package funkc  
+  documentation: False
+
+package funkvm
+  documentation: False

@@ -621,10 +621,9 @@ useStmt :: Parser PStmt
 useStmt = do
   tok TokUse
   modPath <- modulePath
-  items <- choice [
-    tok TokDot *> tok TokStar $> [],  -- use Module.*
-    tok TokLBrace *> sepBy (fmap (Ident . unLocated) identTok) (tok TokComma) <* tok TokRBrace,  -- use Module { item1, item2 }
-    return []  -- use Module (import all)
+  items <- option [] $ choice [
+    try (tok TokDot *> tok TokStar $> []),  -- use Module.*
+    try (tok TokLBrace *> sepBy (fmap (Ident . unLocated) identTok) (tok TokComma) <* tok TokRBrace)  -- use Module { item1, item2 }
     ]
   tok TokSemicolon
   if null items

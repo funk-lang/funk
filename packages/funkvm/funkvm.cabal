@@ -1,0 +1,32 @@
+cabal-version:   3.0
+name:            funkvm
+version:         0.1.0
+license:         Apache-2.0
+license-file:    ../../LICENSE
+maintainer:      matt@hunzinger.me
+author:          Matt Hunzinger
+build-type:      Simple
+synopsis:        Virtual machine for running compiled Funk programs
+
+library
+    exposed-modules:
+        Funk.Interpreter
+
+    hs-source-dirs:   src
+    default-language: Haskell2010
+    ghc-options:      -Wall
+    build-depends:
+        base >=4,
+        funk-core,
+        containers,
+        mtl
+
+executable funkvm
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    default-language: Haskell2010
+    ghc-options:      -Wall
+    build-depends:
+        base >=4,
+        funkvm,
+        funk-core

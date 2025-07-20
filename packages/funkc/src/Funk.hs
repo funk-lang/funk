@@ -17,7 +17,7 @@ import Funk.Core (prettyCoreProgram, prettyCoreModule, CoreProgram, CoreModule(.
 import Funk.Fmt (formatFile, FmtOptions(..))
 import Options.Applicative hiding (ParseError)
 import System.Console.ANSI
-import System.Directory (doesFileExist, doesDirectoryExist, listDirectory, createDirectoryIfMissing)
+import System.Directory (doesFileExist, doesDirectoryExist, listDirectory, createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>), takeExtension, takeFileName, dropExtension, takeDirectory)
 import Control.Monad (forM, forM_)
 import qualified Data.Map as Map
@@ -167,6 +167,12 @@ buildProgram opts = do
           case moduleResult of
             Left moduleError -> putStrLn $ "Error: " ++ moduleError
             Right moduleMap -> do
+              -- Clean up target directory before building
+              targetExists <- doesDirectoryExist (buildTargetDir opts)
+              if targetExists
+                then removeDirectoryRecursive (buildTargetDir opts)
+                else return ()
+              
               -- Create target directory
               createDirectoryIfMissing True (buildTargetDir opts)
               
@@ -309,15 +315,17 @@ filePathToModuleName :: FilePath -> String
 filePathToModuleName filePath = 
   let -- Remove common library directory prefixes and the .funk extension
       cleanPath = dropExtension filePath
+      -- Normalize path separators to forward slashes for consistent processing
+      normalizedCleanPath = map (\c -> if c == '\\' then '/' else c) cleanPath
       -- Remove examples/lib/ prefix if present
-      relativePath = if "examples/lib/" `isPrefixOf` cleanPath
-                     then drop (length "examples/lib/") cleanPath
-                     else takeFileName cleanPath
+      relativePath = if "examples/lib/" `isPrefixOf` normalizedCleanPath
+                     then drop (length "examples/lib/") normalizedCleanPath
+                     else takeFileName normalizedCleanPath
       -- Convert path separators to dots for hierarchical module names
-      normalizedPath = map (\c -> if c == '/' || c == '\\' then '.' else c) relativePath
-  in if normalizedPath == ""
+      moduleName = map (\c -> if c == '/' || c == '\\' then '.' else c) relativePath
+  in if moduleName == ""
      then ""
-     else normalizedPath
+     else moduleName
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
