@@ -140,9 +140,18 @@ prettyStmt (Trait b vars methods) =
    in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 prettyStmt (TraitWithKinds b vars methods) =
   let bStr = text $ show b
-      varsDoc = hsep (punctuate (text ",") (map (\(v, mk) -> case mk of
-        Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
-        Nothing -> text (show v)) vars))
+      varsDoc =
+        hsep
+          ( punctuate
+              (text ",")
+              ( map
+                  ( \(v, mk) -> case mk of
+                      Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+                      Nothing -> text (show v)
+                  )
+                  vars
+              )
+          )
       methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
    in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 prettyStmt (Impl b vars ty methods) =
@@ -181,9 +190,18 @@ prettyStmtWithTypes _ (Trait b vars methods) =
    in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 prettyStmtWithTypes _ (TraitWithKinds b vars methods) =
   let bStr = text $ show b
-      varsDoc = hsep (punctuate (text ",") (map (\(v, mk) -> case mk of
-        Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
-        Nothing -> text (show v)) vars))
+      varsDoc =
+        hsep
+          ( punctuate
+              (text ",")
+              ( map
+                  ( \(v, mk) -> case mk of
+                      Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+                      Nothing -> text (show v)
+                  )
+                  vars
+              )
+          )
       methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
    in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
 prettyStmtWithTypes typeMap (Impl b vars ty methods) =
@@ -275,14 +293,14 @@ prettyExprWithTypes typeMap p (TyApp _ t ty) =
 prettyExprWithTypes typeMap p (BlockExpr _ block) =
   let blockDoc = prettyBlockWithTypes typeMap block
    in parensIf (p > BlockPrec) blockDoc
-prettyExprWithTypes typeMap p (RecordType _ _ fields) =
+prettyExprWithTypes _ p (RecordType _ _ fields) =
   let fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
    in parensIf (p > AtomPrec) (braces (hsep (punctuate (text ",") fieldsDoc)))
 prettyExprWithTypes typeMap p (RecordCreation _ expr fields) =
   let exprDoc = prettyExprWithTypes typeMap AtomPrec expr
       fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprWithTypes typeMap AtomPrec e) fields
    in parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate (text ",") fieldsDoc)))
-prettyExprWithTypes typeMap p (TraitMethod _ traitName _ targetType methodName) =
+prettyExprWithTypes _ p (TraitMethod _ traitName _ targetType methodName) =
   let traitDoc = text (show traitName)
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType

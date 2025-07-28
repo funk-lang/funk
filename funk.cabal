@@ -13,7 +13,6 @@ library
         Funk
         Funk.Fresh
         Funk.Infer
-        Funk.KindInfer
         Funk.Parser
         Funk.Solver
         Funk.STerm

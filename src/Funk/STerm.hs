@@ -300,16 +300,16 @@ sTypeToDisplay = sTypeToDisplayHelper []
         t1' <- sTypeToDisplayHelper visited t1
         t2' <- sTypeToDisplayHelper visited t2
         return $ TArrow t1' t2'
-      TForall ref ty -> do
+      TForall ref t -> do
         b <- readIORef ref
         case b of
-          Bound t -> sTypeToDisplayHelper (ref:visited) t
+          Bound t' -> sTypeToDisplayHelper (ref:visited) t'
           Skolem i _ -> do
-            ty' <- sTypeToDisplayHelper visited ty
-            return $ TForall (unLocated i) ty'
+            t' <- sTypeToDisplayHelper visited t
+            return $ TForall (unLocated i) t'
           Unbound _ idx -> do
-            ty' <- sTypeToDisplayHelper visited ty
-            return $ TForall (Ident ("t" ++ show idx)) ty'
+            t' <- sTypeToDisplayHelper visited t
+            return $ TForall (Ident ("t" ++ show idx)) t'
       TConstraint traitName typeVars targetType bodyType -> do
         traitName' <- sTBindingToIdentImproved traitName
         typeVars' <- mapM sTBindingToIdentImproved typeVars

@@ -4,7 +4,7 @@ module Funk where
 
 import Data.List
 import Funk.Fresh (Env (Env), runFresh)
-import Funk.Infer (constraintsBlock)
+import Funk.Infer (infer)
 import Funk.Parser (parseTopLevel)
 import Funk.STerm
 import Funk.Solver
@@ -17,9 +17,7 @@ import Text.Parsec
 import Text.Parsec.Error
 import qualified Text.PrettyPrint as Pretty
 
-newtype Options = Options
-  { optionsFilePath :: FilePath
-  }
+newtype Options = Options {optionsFilePath :: FilePath}
 
 options :: Parser Options
 options =
@@ -47,12 +45,15 @@ tryRun input = do
       case res of
         Left errs -> return $ Left (SubstError errs)
         Right block -> do
-          cs <- fst <$> runFresh (constraintsBlock block) (Env $ envNextIdx env)
+          cs <- infer block (Env $ envNextIdx env)
           solveConstraints cs env >>= \case
             Left errs -> return $ Left (SolverError errs)
             Right () -> return $ Right block
 
-data Error = ParserError ParseError | SubstError [Located Ident] | SolverError [SError]
+data Error
+  = ParserError ParseError
+  | SubstError [Located Ident]
+  | SolverError [SError]
 
 instance Show Error where
   show (ParserError _) = "Parse Error"

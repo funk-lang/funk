@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Funk.Solver where
@@ -7,18 +8,21 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 import Data.IORef
-import Funk.Infer (Constraint (..))
+import Funk.Infer (Constraint (..), InferResult (..), KindConstraint (..))
 import Funk.STerm
 import qualified Funk.Subst as S
 import Funk.Term
 import Funk.Token
-import System.IO.Unsafe
 import Text.Parsec
 
 data SError
   = InfiniteType (Either SourcePos (Located Ident))
   | UnificationError SType SType
   | MissingTraitImpl SourcePos STBinding SType
+  | KindUnificationError
+  | KindArityMismatch
+  | UnboundKindVariable
+  | InvalidKindBinding
 
 newtype Solver a = Solver {unSolver :: ExceptT [SError] (StateT S.Env IO) a}
   deriving (Functor, Applicative, Monad, MonadIO, MonadState S.Env, MonadError [SError])
@@ -101,48 +105,50 @@ unify t1 t2 = do
       fresh <- freshUnboundTyS pos
       let tSubst = substituteTypeVar v (TVar fresh) t
       unify other tSubst
-    (TApp (TVar v) arg, other) -> do
-      -- Type application with type variable on left - try to bind the type variable
+    (TApp (TVar v) _arg, other) -> do
       v' <- liftIO $ readIORef v
       case v' of
         Unbound {} -> do
-          -- Try to bind the type variable to a function type that can produce 'other'
-          -- This is a heuristic - we assume the type variable should be bound to a function type
           freshArg <- freshUnboundTyS pos
           let functionType = TArrow (TVar freshArg) other
           bindVar v functionType
         _ -> throwError [UnificationError ta tb]
-    (other, TApp (TVar v) arg) -> do
-      -- Type application with type variable on right - try to bind the type variable
+    (other, TApp (TVar v) _arg) -> do
       v' <- liftIO $ readIORef v
       case v' of
         Unbound {} -> do
-          -- Try to bind the type variable to a function type that can produce 'other'
           freshArg <- freshUnboundTyS pos
           let functionType = TArrow (TVar freshArg) other
           bindVar v functionType
         _ -> throwError [UnificationError ta tb]
     (TConstraint traitName typeVars targetType bodyType, other) -> do
-      -- Emit trait constraint and unify body type
-      -- First, skolemize the type variables in the constraint type
-      freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
-      let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) targetType typeVars
-      let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) bodyType typeVars
-      solveTrait traitName freshVars skolemizedTarget
-      unify skolemizedBody other
+      case typeVars of
+        [] -> do
+          solveTrait traitName [] targetType
+          unify bodyType other
+        (_firstVar:_restVars) -> do
+          freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
+          case freshVars of
+            [] -> throwError [UnificationError ta tb] -- This shouldn't happen since typeVars is non-empty
+            (firstFresh:_) -> do
+              let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar firstFresh) acc) targetType typeVars
+              let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar firstFresh) acc) bodyType typeVars
+              solveTrait traitName freshVars skolemizedTarget
+              unify skolemizedBody other
     (other, TConstraint traitName typeVars targetType bodyType) -> do
-      -- Emit trait constraint and unify body type
-      -- First, skolemize the type variables in the constraint type
-      freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
-      let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) targetType typeVars
-      let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar (head freshVars)) acc) bodyType typeVars
-      solveTrait traitName freshVars skolemizedTarget
-      unify other skolemizedBody
-    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
-      -- Both are constraint types - solve both constraints and unify body types
-      solveTrait traitName1 typeVars1 targetType1
-      solveTrait traitName2 typeVars2 targetType2
-      unify bodyType1 bodyType2
+      case typeVars of
+        [] -> do
+          solveTrait traitName [] targetType
+          unify other bodyType
+        (_firstVar:_restVars) -> do
+          freshVars <- mapM (\_ -> freshUnboundTyS pos) typeVars
+          case freshVars of
+            [] -> throwError [UnificationError ta tb] -- This shouldn't happen since typeVars is non-empty
+            (firstFresh:_) -> do
+              let skolemizedTarget = foldr (\var acc -> substituteTypeVar var (TVar firstFresh) acc) targetType typeVars
+              let skolemizedBody = foldr (\var acc -> substituteTypeVar var (TVar firstFresh) acc) bodyType typeVars
+              solveTrait traitName freshVars skolemizedTarget
+              unify other skolemizedBody
     _ -> throwError [UnificationError ta tb]
 
 substituteTypeVar :: STBinding -> SType -> SType -> SType
@@ -184,15 +190,13 @@ occursCheck v t = do
 solveTrait :: STBinding -> [STBinding] -> SType -> Solver ()
 solveTrait traitName typeArgs targetType = do
   env <- get
-  -- Prune the target type to get its canonical form
   prunedTarget <- prune targetType
   maybeImpl <- findMatchingImpl traitName typeArgs prunedTarget (S.envImpls env)
   case maybeImpl of
-    Just _impl -> return () -- Implementation found, constraint satisfied
+    Just _impl -> return ()
     Nothing -> do
       pos <- liftIO $ typePos targetType
       throwError [MissingTraitImpl pos traitName targetType]
-
 
 solve :: [Constraint] -> Solver ()
 solve = mapM_ go
@@ -200,14 +204,12 @@ solve = mapM_ go
     go (CEq t1 t2) = unify t1 t2
     go (CTrait traitName typeArgs targetType) = solveTrait traitName typeArgs targetType
 
--- Check if two traits match by comparing their names
 traitsMatch :: STBinding -> STBinding -> Solver Bool
 traitsMatch trait1 trait2 = do
   name1 <- liftIO $ sTBindingToIdent trait1
   name2 <- liftIO $ sTBindingToIdent trait2
   return (name1 == name2)
 
--- Find a matching trait implementation
 findMatchingImpl :: STBinding -> [STBinding] -> SType -> [(STBinding, [STBinding], SType, SStmt)] -> Solver (Maybe SStmt)
 findMatchingImpl traitName _typeArgs targetType impls = do
   matches <- forM impls $ \(implTrait, _implVars, implType, impl) -> do
@@ -224,7 +226,6 @@ findMatchingImpl traitName _typeArgs targetType impls = do
     maybeToList Nothing = []
     maybeToList (Just x) = [x]
 
--- Check if two types can unify (proper System FC unification)
 typesUnify :: SType -> SType -> Solver Bool
 typesUnify t1 t2 = do
   env <- liftIO $ newIORef emptyUnificationEnv
@@ -233,7 +234,7 @@ typesUnify t1 t2 = do
     Right () -> return True
     Left _ -> return False
 
-newtype UnificationEnv = UnificationEnv { unifSubst :: [(STBinding, SType)] }
+newtype UnificationEnv = UnificationEnv {unifSubst :: [(STBinding, SType)]}
 
 emptyUnificationEnv :: UnificationEnv
 emptyUnificationEnv = UnificationEnv []
@@ -246,29 +247,26 @@ tryUnify envRef t1 t2 = do
     (TVar v1, TVar v2) | v1 == v2 -> return $ Right ()
     (TVar v1, t) -> do
       occurs <- occursCheckIO v1 t
-      if occurs 
+      if occurs
         then return $ Left "occurs check"
         else do
-          modifyIORef envRef $ \env -> env { unifSubst = (v1, t) : unifSubst env }
+          modifyIORef envRef $ \env -> env {unifSubst = (v1, t) : unifSubst env}
           return $ Right ()
     (t, TVar v2) -> do
       occurs <- occursCheckIO v2 t
       if occurs
         then return $ Left "occurs check"
         else do
-          modifyIORef envRef $ \env -> env { unifSubst = (v2, t) : unifSubst env }
+          modifyIORef envRef $ \env -> env {unifSubst = (v2, t) : unifSubst env}
           return $ Right ()
-    (TConstraint traitName1 typeVars1 targetType1 bodyType1, TConstraint traitName2 typeVars2 targetType2 bodyType2) -> do
-      -- Both are constraint types - unify both target and body types
+    (TConstraint _traitName1 _typeVars1 targetType1 bodyType1, TConstraint _traitName2 _typeVars2 targetType2 bodyType2) -> do
       r1 <- tryUnify envRef targetType1 targetType2
       case r1 of
         Left err -> return $ Left err
         Right () -> tryUnify envRef bodyType1 bodyType2
-    (TConstraint traitName typeVars targetType bodyType, other) -> do
-      -- One is constraint type - unify body type with other
+    (TConstraint _traitName _typeVars _targetType bodyType, other) -> do
       tryUnify envRef bodyType other
-    (other, TConstraint traitName typeVars targetType bodyType) -> do
-      -- One is constraint type - unify body type with other
+    (other, TConstraint _traitName _typeVars _targetType bodyType) -> do
       tryUnify envRef other bodyType
     (TApp t1a t1b, TApp t2a t2b) -> do
       r1 <- tryUnify envRef t1a t2a
@@ -280,7 +278,7 @@ tryUnify envRef t1 t2 = do
       case r1 of
         Left err -> return $ Left err
         Right () -> tryUnify envRef t1b t2b
-    (TList t1, TList t2) -> tryUnify envRef t1 t2
+    (TList t1'', TList t2'') -> tryUnify envRef t1'' t2''
     (TUnit, TUnit) -> return $ Right ()
     _ -> return $ Left "type mismatch"
 
@@ -308,7 +306,7 @@ substAndPrune envRef ty = do
 
 occursCheckIO :: STBinding -> SType -> IO Bool
 occursCheckIO var ty = case ty of
-  TVar ref | ref == var -> return False -- Same variable is fine for unification
+  TVar ref | ref == var -> return False
   TVar ref -> do
     binding <- readIORef ref
     case binding of
@@ -327,9 +325,71 @@ occursCheckIO var ty = case ty of
   TList t -> occursCheckIO var t
   TUnit -> return False
 
-solveConstraints :: [Constraint] -> S.Env -> IO (Either [SError] ())
-solveConstraints cs env = do
+solveConstraints :: InferResult -> S.Env -> IO (Either [SError] ())
+solveConstraints result env = do
+  res <- solveKindConstraints $ kindConstraints result
+  case res of
+    Left errs -> return $ Left errs
+    Right () -> do
+      res' <- runSolver (solve $ typeConstraints result) env
+      case res' of
+        Left errs -> return $ Left errs
+        Right () -> return $ Right ()
+
+solveTypeConstraints :: [Constraint] -> S.Env -> IO (Either [SError] ())
+solveTypeConstraints cs env = do
   res' <- runSolver (solve cs) env
   case res' of
     Left errs -> return (Left errs)
     Right () -> return (Right ())
+
+solveKindConstraints :: [KindConstraint] -> IO (Either [SError] ())
+solveKindConstraints cs = do
+  results <- mapM trySolveKindConstraint cs
+  case sequence results of
+    Left errs -> return $ Left errs
+    Right _ -> return $ Right ()
+
+trySolveKindConstraint :: KindConstraint -> IO (Either [SError] ())
+trySolveKindConstraint constraint = do
+  result <- tryIO $ solveKindConstraint constraint
+  case result of
+    Left err -> return $ Left [err]
+    Right () -> return $ Right ()
+  where
+    tryIO action = do
+      result <- action
+      case result of
+        Left err -> return $ Left err
+        Right () -> return $ Right ()
+
+solveKindConstraint :: KindConstraint -> IO (Either SError ())
+solveKindConstraint = \case
+  KEq k1 k2 -> unifyKinds k1 k2
+  KArrowConstraint k1 k2 k3 -> unifyKinds k3 (KArrow k1 k2)
+
+unifyKinds :: SKind -> SKind -> IO (Either SError ())
+unifyKinds k1 k2 = case (k1, k2) of
+  (KStar, KStar) -> return $ Right ()
+  (KVar ref1, k) -> do
+    binding <- readIORef ref1
+    case binding of
+      KUnbound _ _ -> do
+        writeIORef ref1 (KBound k)
+        return $ Right ()
+      KBound k' -> unifyKinds k' k
+      _ -> return $ Left InvalidKindBinding
+  (k, KVar ref2) -> do
+    binding <- readIORef ref2
+    case binding of
+      KUnbound _ _ -> do
+        writeIORef ref2 (KBound k)
+        return $ Right ()
+      KBound k' -> unifyKinds k k'
+      _ -> return $ Left InvalidKindBinding
+  (KArrow k1a k1b, KArrow k2a k2b) -> do
+    r1 <- unifyKinds k1a k2a
+    case r1 of
+      Left err -> return $ Left err
+      Right () -> unifyKinds k1b k2b
+  _ -> return $ Left KindUnificationError
