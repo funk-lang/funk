@@ -24,7 +24,6 @@ data Token
   | TokConstraintArrow
   | TokDot
   | TokColon
-  | TokDoubleColon
   | TokStar
   | TokLParen
   | TokRParen
@@ -58,7 +57,6 @@ instance Show Token where
     TokConstraintArrow -> "=>"
     TokDot -> "."
     TokColon -> ":"
-    TokDoubleColon -> "'::''"
     TokStar -> "'*'"
     TokLParen -> "'('"
     TokRParen -> "')'"
@@ -90,7 +88,6 @@ token = do
       [ TokLambda <$ char '\\',
         TokArrow <$ try (string "->"),
         TokConstraintArrow <$ try (string "=>"),
-        TokDoubleColon <$ try (string "::"),
         TokDot <$ char '.',
         TokColon <$ char ':',
         TokStar <$ char '*',

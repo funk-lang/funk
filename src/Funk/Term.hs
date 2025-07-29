@@ -48,9 +48,9 @@ prettyKind p (KArrow k1 k2) =
 
 -- Helper function to collect nested forall variables
 collectForallVars :: (Show b) => Type b -> ([String], Type b)
-collectForallVars (TForall var body) = 
+collectForallVars (TForall var body) =
   let (vars, finalBody) = collectForallVars body
-  in (show var : vars, finalBody)
+   in (show var : vars, finalBody)
 collectForallVars ty = ([], ty)
 
 prettyType :: (Show b) => Precedence -> Type b -> Doc
@@ -154,7 +154,7 @@ prettyStmt (Trait b vars methods) =
               (text ",")
               ( map
                   ( \(v, mk) -> case mk of
-                      Just k -> text (show v) <+> text "::" <+> prettyKind AtomPrec k
+                      Just k -> text (show v) <+> text ":" <+> prettyKind AtomPrec k
                       Nothing -> text (show v)
                   )
                   vars

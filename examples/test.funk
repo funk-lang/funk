@@ -2,16 +2,16 @@ data State s a = {
   runState: s -> a
 }
 
-trait Functor (f :: * -> *) {
+trait Functor (f : * -> *) {
   fmap: forall a b . (a -> b) -> f a -> f b
 }
 
-trait Monad (m :: * -> *) {
+trait Monad (m : * -> *) {
   bind: forall a b . m a -> (a -> m b) -> m b,
   pure: forall a . a -> m a
 }
 
-trait MonadState (s :: *) (m :: * -> *) {
+trait MonadState (s : *) (m : * -> *) {
   get: m s,
   put: s -> m s
 }

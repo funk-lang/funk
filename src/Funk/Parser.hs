@@ -282,7 +282,7 @@ traitStmt = do
   vars <- many (do
     tok TokLParen
     var <- fmap Ident <$> identTok
-    tok TokDoubleColon
+    tok TokColon
     kind <- kindExpr
     tok TokRParen
     return (var, Just kind))
