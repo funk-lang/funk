@@ -297,9 +297,7 @@ traitStmt = do
       )
       (tok TokComma)
   tok TokRBrace
-  case vars of
-    [] -> return $ Trait v [] methods
-    _ -> return $ TraitWithKinds v vars methods
+  return $ Trait v vars methods
 
 implStmt :: Parser PStmt
 implStmt = do

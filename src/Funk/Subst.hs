@@ -238,16 +238,10 @@ substStmt (DataForall i vars fields) = do
       }
   return $ DataForall ref vars' sfields
 substStmt (Trait i vars methods) = do
-  vars' <- mapM freshSkolem vars
-  smethods <- forM methods $ \(f, ty) -> do
-    sty <- substTy ty
-    return (f, sty)
-  ref <- freshSkolem i
-  let traitStmt' = Trait ref vars' smethods
-  modify $ \env -> env {envTraits = Map.insert (unLocated i) traitStmt' (envTraits env)}
-  return traitStmt'
-substStmt (TraitWithKinds i vars methods) = do
-  vars' <- mapM (freshSkolem . fst) vars
+  let go (v, _) = do
+        ref <- freshSkolem v
+        return (ref, Nothing) -- TODO kind information is not handled here
+  vars' <- mapM go vars
   smethods <- forM methods $ \(f, ty) -> do
     sty <- substTy ty
     return (f, sty)

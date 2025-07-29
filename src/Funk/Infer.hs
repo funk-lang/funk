@@ -52,22 +52,39 @@ generateBidirectionalConstraints :: SExpr -> SType -> Fresh InferResult
 generateBidirectionalConstraints expr expectedType = case expr of
   App _ t1 t2 -> do
     case t1 of
-      TraitMethod _ _ _ targetType _ -> do
+      TraitMethod _ _ typeArgs targetType _ -> do
+        -- Extract type variables from the expected type context
         typeConstraints' <- case expectedType of
-          TApp constructor _ ->
-            return [CEq targetType constructor]
-          TVar _ ->
-            return [CEq targetType expectedType]
+          TApp constructor _ -> return [CEq targetType constructor]
+          TVar _ -> return [CEq targetType expectedType]
+          TForall _ innerType -> 
+            case innerType of
+              TConstraint _ constraintTypeVars constraintTarget _ -> do
+                -- Try to unify type arguments with constraint context
+                let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+                return $ CEq targetType constraintTarget : typeArgConstraints
+              _ -> return [CEq targetType expectedType]
+          TConstraint _ constraintTypeVars constraintTarget _ -> do
+            -- Unify type arguments with constraint type variables
+            let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+            return $ CEq targetType constraintTarget : typeArgConstraints
           _ -> return []
         kindConstraints' <- kindInferType expectedType
         return $ InferResult typeConstraints' kindConstraints'
       App _ innerFunc _innerArg -> case innerFunc of
-        TraitMethod methodType _ _ targetType _methodName -> do
+        TraitMethod methodType _ typeArgs targetType _methodName -> do
           typeConstraints' <- case expectedType of
-            TApp constructor _ -> do
-              return [CEq targetType constructor]
-            _ -> do
-              return [CEq (TVar methodType) expectedType]
+            TApp constructor _ -> return [CEq targetType constructor]
+            TForall _ innerType -> 
+              case innerType of
+                TConstraint _ constraintTypeVars constraintTarget _ -> do
+                  let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+                  return $ CEq targetType constraintTarget : typeArgConstraints
+                _ -> return [CEq (TVar methodType) expectedType]
+            TConstraint _ constraintTypeVars constraintTarget _ -> do
+              let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+              return $ CEq targetType constraintTarget : typeArgConstraints
+            _ -> return [CEq (TVar methodType) expectedType]
           kindConstraints' <- kindInferType expectedType
           return $ InferResult typeConstraints' kindConstraints'
         _ -> do
@@ -82,9 +99,18 @@ generateBidirectionalConstraints expr expectedType = case expr of
 
 extractTraitMethodConstraints :: SExpr -> SType -> Fresh InferResult
 extractTraitMethodConstraints expr expectedType = case expr of
-  TraitMethod _ _ _ targetType _ -> do
+  TraitMethod _ _ typeArgs targetType _ -> do
     typeConstraints' <- case expectedType of
       TApp constructor _ -> return [CEq targetType constructor]
+      TForall _ innerType -> 
+        case innerType of
+          TConstraint _ constraintTypeVars constraintTarget _ -> do
+            let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+            return $ CEq targetType constraintTarget : typeArgConstraints
+          _ -> return []
+      TConstraint _ constraintTypeVars constraintTarget _ -> do
+        let typeArgConstraints = zipWith CEq typeArgs (map TVar constraintTypeVars)
+        return $ CEq targetType constraintTarget : typeArgConstraints
       _ -> return []
     kindConstraints' <- kindInferType expectedType
     return $ InferResult typeConstraints' kindConstraints'
@@ -254,7 +280,6 @@ constraintsStmt (Type {}) = return mempty
 constraintsStmt (Data {}) = return mempty
 constraintsStmt (DataForall {}) = return mempty
 constraintsStmt (Trait {}) = return mempty
-constraintsStmt (TraitWithKinds {}) = return mempty
 constraintsStmt (Impl _ _ _ methods) = do
   results <- mapM (constraintsExpr . snd) methods
   return $ mconcat results

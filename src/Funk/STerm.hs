@@ -116,37 +116,37 @@ resolveTraitMethodsWithType sexpr expectedType = do
 
 directResolveWithType :: Expr Ident -> Type Ident -> IO (Expr Ident)
 directResolveWithType expr expectedType = case expr of
-  App _ f arg -> do
+  App appTy f arg -> do
     f' <- directResolveWithType f expectedType
     arg' <- directResolveWithType arg expectedType
-    return $ App Nothing f' arg'
-  TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName
+    return $ App appTy f' arg'
+  TraitMethod methodTy traitName typeArgs (TVar (Ident tname)) methodName
     | take 1 tname == "t" -> do
         case expectedType of
           TApp constructor _ ->
-            return $ TraitMethod Nothing traitName typeArgs constructor methodName
+            return $ TraitMethod methodTy traitName typeArgs constructor methodName
           _ -> return expr
   _ -> return expr
 
 contextResolveExpr :: Expr Ident -> STBinding -> IO (Expr Ident)
 contextResolveExpr expr exprType = case expr of
-  App _ f arg -> do
+  App appTy f arg -> do
     exprTypeResolved <- sTypeToDisplay (TVar exprType)
     f' <- case f of
-      TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName
+      TraitMethod methodTy traitName typeArgs (TVar (Ident tname)) methodName
         | take 1 tname == "t" -> do
             case exprTypeResolved of
               TApp constructor _ ->
-                return $ TraitMethod Nothing traitName typeArgs constructor methodName
+                return $ TraitMethod methodTy traitName typeArgs constructor methodName
               _ -> return f
       _ -> contextResolveExpr f exprType
-    return $ App Nothing f' arg
-  TraitMethod _ traitName typeArgs (TVar (Ident tname)) methodName
+    return $ App appTy f' arg
+  TraitMethod methodTy traitName typeArgs (TVar (Ident tname)) methodName
     | take 1 tname == "t" -> do
         exprTypeResolved <- sTypeToDisplay (TVar exprType)
         case exprTypeResolved of
           TApp constructor _ ->
-            return $ TraitMethod Nothing traitName typeArgs constructor methodName
+            return $ TraitMethod methodTy traitName typeArgs constructor methodName
           _ -> return expr
   _ -> return expr
 
@@ -188,53 +188,63 @@ sExprToDisplayWithTypes :: SExpr -> IO (Expr Ident)
 sExprToDisplayWithTypes sexpr = case sexpr of
   Var _ binding -> do
     binding' <- sBindingToIdent binding
-    _ <- sTypeToDisplay (TVar (typeOf sexpr))
-    return $ Var Nothing binding'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ Var ty' binding'
   App _ t1 t2 -> do
     t1' <- sExprToDisplayWithTypes t1
     t2' <- sExprToDisplayWithTypes t2
-    return $ App Nothing t1' t2'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ App ty' t1' t2'
   Lam _ binding mty body -> do
     binding' <- sBindingToIdent binding
-    _ <- sTypeToDisplay (TVar (typeOf sexpr))
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
     mty' <- case mty of
       Just ty -> Just <$> sTypeToDisplay ty
       Nothing -> Just <$> sTypeToDisplay (TVar (typeOf sexpr))
     body' <- sExprToDisplayWithTypes body
-    return $ Lam Nothing binding' mty' body'
+    return $ Lam ty' binding' mty' body'
   TyApp _ body outTy -> do
     body' <- sExprToDisplayWithTypes body
     outTy' <- sTypeToDisplay outTy
-    return $ TyApp Nothing body' outTy'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ TyApp ty' body' outTy'
   BlockExpr _ block -> do
     block' <- sBlockToDisplayWithTypes block
-    return $ BlockExpr Nothing block'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ BlockExpr ty' block'
   RecordType _ v fields -> do
     fields' <- forM fields $ \(f, ty) -> do
       ty' <- sTypeToDisplay ty
       return (f, ty')
     v' <- sBindingToIdent v
-    return $ RecordType Nothing v' fields'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ RecordType ty' v' fields'
   RecordCreation _ expr fields -> do
     expr' <- sExprToDisplayWithTypes expr
     fields' <- forM fields $ \(f, e) -> do
       e' <- sExprToDisplayWithTypes e
       return (f, e')
-    return $ RecordCreation Nothing expr' fields'
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ RecordCreation ty' expr' fields'
   TraitMethod _ traitName typeArgs targetType methodName -> do
     traitName' <- sTBindingToIdent traitName
     typeArgs' <- mapM sTypeToDisplay typeArgs
     targetType' <- aggressiveTypeResolve targetType
-    return $ TraitMethod Nothing traitName' typeArgs' targetType' methodName
-  PrimUnit _ -> return $ PrimUnit Nothing
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ TraitMethod ty' traitName' typeArgs' targetType' methodName
+  PrimUnit _ -> do
+    ty' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ PrimUnit ty'
   PrimNil _ ty -> do
     ty' <- sTypeToDisplay ty
-    return $ PrimNil Nothing ty'
+    exprTy' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ PrimNil exprTy' ty'
   PrimCons _ ty headExpr tailExpr -> do
     ty' <- sTypeToDisplay ty
     head' <- sExprToDisplayWithTypes headExpr
     tail' <- sExprToDisplayWithTypes tailExpr
-    return $ PrimCons Nothing ty' head' tail'
+    exprTy' <- sTypeToDisplay (TVar (typeOf sexpr))
+    return $ PrimCons exprTy' ty' head' tail'
 
 sExprToDisplay :: SExpr -> IO (Expr Ident)
 sExprToDisplay = sExprToDisplayWithTypes
@@ -284,13 +294,14 @@ sTypeToDisplay = sTypeToDisplayHelper []
 
 sStmtToDisplay :: SStmt -> IO (Stmt Ident)
 sStmtToDisplay = \case
-  Let _ v mty body -> do
+  Let letTy v mty body -> do
     v' <- sBindingToIdent v
     mty' <- mapM sTypeToDisplay mty
+    letTy' <- sTypeToDisplay (TVar letTy)
     body' <- case mty' of
       Just annotationType -> resolveTraitMethodsWithType body annotationType
       Nothing -> sExprToDisplay body
-    return $ Let Nothing v' mty' body'
+    return $ Let letTy' v' mty' body'
   Type binding ty -> do
     binding' <- sTBindingToIdent binding
     ty' <- sTypeToDisplay ty
@@ -310,14 +321,10 @@ sStmtToDisplay = \case
     return $ DataForall binding' vars' fields'
   Trait binding vars methods -> do
     binding' <- sTBindingToIdent binding
-    vars' <- mapM sTBindingToIdent vars
-    methods' <- forM methods $ \(f, ty) -> do
-      ty' <- sTypeToDisplay ty
-      return (f, ty')
-    return $ Trait binding' vars' methods'
-  TraitWithKinds binding vars methods -> do
-    binding' <- sTBindingToIdent binding
-    vars' <- mapM (sTBindingToIdent . fst) vars
+    let go (v, _) = do
+          ref <- sTBindingToIdent v
+          return (ref, Nothing) -- TODO kind information is not handled here
+    vars' <- mapM go vars
     methods' <- forM methods $ \(f, ty) -> do
       ty' <- sTypeToDisplay ty
       return (f, ty')

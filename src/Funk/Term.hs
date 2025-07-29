@@ -46,19 +46,27 @@ prettyKind p (KArrow k1 k2) =
       s2 = prettyKind ArrowPrec k2
    in parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
 
+-- Helper function to collect nested forall variables
+collectForallVars :: (Show b) => Type b -> ([String], Type b)
+collectForallVars (TForall var body) = 
+  let (vars, finalBody) = collectForallVars body
+  in (show var : vars, finalBody)
+collectForallVars ty = ([], ty)
+
 prettyType :: (Show b) => Precedence -> Type b -> Doc
 prettyType _ (TVar b) = text $ show b
 prettyType p (TArrow t1 t2) =
   let s1 = prettyType (succ ArrowPrec) t1
       s2 = prettyType ArrowPrec t2
    in parensIf (p > ArrowPrec) (s1 <+> text "->" <+> s2)
-prettyType p (TForall ref t) =
-  let bStr = text $ show ref
-      st = prettyType ForallPrec t
-   in parensIf (p > ForallPrec) (text "forall" <+> bStr <+> text "." <+> st)
+prettyType p ty@(TForall _ _) =
+  let (vars, body) = collectForallVars ty
+      varsDoc = hsep (map text vars)
+      bodyDoc = prettyType ForallPrec body
+   in parensIf (p > ForallPrec) (text "forall" <+> varsDoc <+> text "." <+> bodyDoc)
 prettyType p (TConstraint traitName typeVars targetType bodyType) =
   let traitDoc = text $ show traitName
-      typeVarsDoc = hsep (punctuate (text " ") (map (text . show) typeVars))
+      typeVarsDoc = hsep (punctuate (text ",") (map (text . show) typeVars))
       targetDoc = prettyType AtomPrec targetType
       bodyDoc = prettyType ArrowPrec bodyType
    in parensIf (p > ArrowPrec) (traitDoc <+> typeVarsDoc <+> text "=>" <+> targetDoc <+> text "->" <+> bodyDoc)
@@ -88,14 +96,14 @@ class Binding b where
 
 instance Binding Ident where
   type BTVar Ident = Ident
-  type BVar Ident = Maybe (Type Ident)
-  type BLam Ident = Maybe (Type Ident)
-  type BApp Ident = Maybe (Type Ident)
-  type BTyApp Ident = Maybe (Type Ident)
-  type BLet Ident = Maybe (Type Ident)
-  type BBlock Ident = Maybe (Type Ident)
-  type BRecord Ident = Maybe (Type Ident)
-  type BRecordCreation Ident = Maybe (Type Ident)
+  type BVar Ident = Type Ident
+  type BLam Ident = Type Ident
+  type BApp Ident = Type Ident
+  type BTyApp Ident = Type Ident
+  type BLet Ident = Type Ident
+  type BBlock Ident = Type Ident
+  type BRecord Ident = Type Ident
+  type BRecordCreation Ident = Type Ident
 
 data Expr b
   = Var (BVar b) b
@@ -115,8 +123,7 @@ data Stmt b
   | Type (BTVar b) (Type (BTVar b))
   | Data (BTVar b) [(Ident, Type (BTVar b))]
   | DataForall (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
-  | Trait (BTVar b) [BTVar b] [(Ident, Type (BTVar b))]
-  | TraitWithKinds (BTVar b) [(BTVar b, Maybe (Kind (BTVar b)))] [(Ident, Type (BTVar b))]
+  | Trait (BTVar b) [(BTVar b, Maybe (Kind (BTVar b)))] [(Ident, Type (BTVar b))]
   | Impl (BTVar b) [BTVar b] (Type (BTVar b)) [(Ident, Expr b)]
 
 prettyStmt :: Stmt Ident -> Doc
@@ -125,9 +132,7 @@ prettyStmt (Let letTy b mty body) =
       bodyDoc = prettyExprPrec AtomPrec body
       tyDoc = case mty of
         Just t -> text " :" <+> prettyType AtomPrec t
-        Nothing -> case letTy of
-          Just t -> text " :" <+> prettyType AtomPrec t
-          Nothing -> empty
+        Nothing -> text " :" <+> prettyType AtomPrec letTy
       letDoc = text "let" <+> (bStr <> tyDoc) <+> text "=" <+> bodyDoc
    in letDoc <> semi
 prettyStmt (Type b t) =
@@ -142,11 +147,6 @@ prettyStmt (DataForall b vars fields) =
       fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
    in text "data" <+> bStr <+> text "=" <+> text "forall" <+> varsDoc <+> text "." <+> braces (hsep (punctuate (text ",") fieldsDoc))
 prettyStmt (Trait b vars methods) =
-  let bStr = text $ show b
-      varsDoc = hsep (punctuate (text ",") (map (text . show) vars))
-      methodsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) methods
-   in text "trait" <+> bStr <+> varsDoc <+> braces (hsep (punctuate (text ",") methodsDoc))
-prettyStmt (TraitWithKinds b vars methods) =
   let bStr = text $ show b
       varsDoc =
         hsep
@@ -174,75 +174,53 @@ prettyExpr = prettyExprPrec AtomPrec
 
 prettyExprPrec :: Precedence -> Expr Ident -> Doc
 prettyExprPrec _ (Var varTy b) =
-  case varTy of
-    Just ty -> parens (text (show b) <+> text ":" <+> prettyType AtomPrec ty)
-    Nothing -> text $ show b
+  parens (text (show b) <+> text ":" <+> prettyType AtomPrec varTy)
 prettyExprPrec p (Lam lamTy b mty body) =
   let bStr = text $ show b
       bodyDoc = prettyExprPrec LamPrec body
       tyDoc = case mty of
         Just t -> text ":" <+> prettyType AtomPrec t
-        Nothing -> case lamTy of
-          Just t -> text ":" <+> prettyType AtomPrec t
-          Nothing -> empty
+        Nothing -> text ":" <+> prettyType AtomPrec lamTy
    in parensIf (p > LamPrec) (text "\\" <+> (bStr <> tyDoc) <+> text "->" <+> bodyDoc)
 prettyExprPrec p (App appTy t1 t2) =
   let s1 = prettyExprPrec AppPrec t1
       s2 = prettyExprPrec AtomPrec t2
       result = parensIf (p > AppPrec) (s1 <+> s2)
-   in case appTy of
-        Just ty -> parens (result <+> text ":" <+> prettyType AtomPrec ty)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec appTy)
 prettyExprPrec p (TyApp tyAppTy t ty) =
   let s = prettyExprPrec TyAppPrec t
       tyDoc = prettyType AtomPrec ty
       result = parensIf (p > TyAppPrec) (s <+> brackets tyDoc)
-   in case tyAppTy of
-        Just resultTy -> parens (result <+> text ":" <+> prettyType AtomPrec resultTy)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec tyAppTy)
 prettyExprPrec p (BlockExpr blockTy block) =
   let blockDoc = prettyBlock block
       result = parensIf (p > BlockPrec) blockDoc
-   in case blockTy of
-        Just ty -> parens (result <+> text ":" <+> prettyType AtomPrec ty)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec blockTy)
 prettyExprPrec p (RecordType recordTy _ fields) =
   let fieldsDoc = map (\(f, ty) -> (text (unIdent f) <> text ":") <+> prettyType AtomPrec ty) fields
       result = parensIf (p > AtomPrec) (braces (hsep (punctuate (text ",") fieldsDoc)))
-   in case recordTy of
-        Just ty -> parens (result <+> text ":" <+> prettyType AtomPrec ty)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec recordTy)
 prettyExprPrec p (RecordCreation recordCreationTy expr fields) =
   let exprDoc = prettyExprPrec AtomPrec expr
       fieldsDoc = map (\(f, e) -> (text (unIdent f) <> text " =") <+> prettyExprPrec AtomPrec e) fields
       result = parensIf (p > AtomPrec) (exprDoc <+> braces (hsep (punctuate (text ",") fieldsDoc)))
-   in case recordCreationTy of
-        Just ty -> parens (result <+> text ":" <+> prettyType AtomPrec ty)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec recordCreationTy)
 prettyExprPrec p (TraitMethod methodTy traitName _ targetType methodName) =
   let traitDoc = text (show traitName)
       methodDoc = text (unIdent methodName)
       targetDoc = prettyType AtomPrec targetType
       result = parensIf (p > AppPrec) (traitDoc <> text "." <> methodDoc <> text "@" <> targetDoc)
-   in case methodTy of
-        Just ty -> parens (result <+> text ":" <+> prettyType AtomPrec ty)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec methodTy)
 prettyExprPrec _ (PrimUnit unitTy) =
-  case unitTy of
-    Just ty -> parens (text "#Unit" <+> text ":" <+> prettyType AtomPrec ty)
-    Nothing -> text "#Unit"
+  parens (text "#Unit" <+> text ":" <+> prettyType AtomPrec unitTy)
 prettyExprPrec _ (PrimNil nilTy ty) =
   let result = text "#nil" <> brackets (prettyType AtomPrec ty)
-   in case nilTy of
-        Just resultTy -> parens (result <+> text ":" <+> prettyType AtomPrec resultTy)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec nilTy)
 prettyExprPrec p (PrimCons consTy ty headExpr tailExpr) =
   let headDoc = prettyExprPrec AtomPrec headExpr
       tailDoc = prettyExprPrec AtomPrec tailExpr
       result = parensIf (p > AppPrec) ((text "#cons" <> brackets (prettyType AtomPrec ty)) <+> headDoc <+> tailDoc)
-   in case consTy of
-        Just resultTy -> parens (result <+> text ":" <+> prettyType AtomPrec resultTy)
-        Nothing -> result
+   in parens (result <+> text ":" <+> prettyType AtomPrec consTy)
 
 data Block b = Block [Stmt b] (Expr b)
 
