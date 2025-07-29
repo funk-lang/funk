@@ -29,7 +29,7 @@ run = do
   input <- readFile (optionsFilePath opts)
   res <- tryRun input
   case res of
-    Left err -> showErrorPretty err input >>= putStrLn
+    Left err -> showErrorPretty err input >>= putStr
     Right block -> do
       block' <- sBlockToDisplay block
       putStrLn $ showFile block'
@@ -139,16 +139,20 @@ showErrorLine pos input msg =
       srcLine = case drop (linePos - 1) (lines input) of
         (line : _) -> line
         [] -> ""
+      linePosStr = show linePos
+      indent = replicate (length linePosStr) ' '
    in unlines
-        [ " --> "
+        [ indent
+            ++ "--> "
             ++ sourceName pos
             ++ ":"
             ++ show linePos
             ++ ":"
             ++ show colPos,
-          "  |",
+          indent ++ " |",
           show linePos ++ " | " ++ srcLine,
-          "  |"
+          indent
+            ++ " |"
             ++ setSGRCode [SetColor Foreground Vivid Red]
             ++ replicate colPos ' '
             ++ "^ "
