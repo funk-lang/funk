@@ -3,7 +3,7 @@
 module Funk where
 
 import Data.List
-import Funk.Fresh (Env (Env), runFresh)
+import Funk.Fresh (Env (Env))
 import Funk.Infer (infer)
 import Funk.Parser (parseTopLevel)
 import Funk.STerm
@@ -32,8 +32,7 @@ run = do
     Left err -> showErrorPretty err input >>= putStrLn
     Right block -> do
       block' <- sBlockToDisplay block
-      typeMap <- extractTypeMapping (blockExpr block)
-      putStrLn $ showFileWithTypes typeMap block'
+      putStrLn $ showFile block'
 
 tryRun :: String -> IO (Either Error SBlock)
 tryRun input = do
